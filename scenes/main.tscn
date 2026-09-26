@@ -30,6 +30,8 @@ color = Color(0.2, 0.22, 0.28, 1)
 [node name="BottomTerrain" type="Node2D" parent="."]
 position = Vector2(0, 360)
 
+[node name="Lights" type="Node2D" parent="."]
+
 [node name="Goal" type="ColorRect" parent="."]
 mouse_filter = 2
 

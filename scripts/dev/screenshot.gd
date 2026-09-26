@@ -7,10 +7,15 @@ extends SceneTree
 const MAIN_SCENE: PackedScene = preload("res://scenes/main.tscn")
 ## 敵の出現先の画面 (Lane)
 const Combat := preload("res://scripts/combat.gd")
-## 地面とゴールの位置
+## 地面・光源・ゴールの位置
 const Stage := preload("res://scripts/stage.gd")
+## 主人公のスクリプト (体の大きさ)
+const Hero := preload("res://scripts/hero.gd")
 ## 画面 (Screen) の定義を持つ autoload の GameState のスクリプト
 const GameStateScript := preload("res://scripts/game_state.gd")
+## 前の攻撃のクールダウンが終わるのを待つ物理フレーム数の上限。攻撃の間隔 (0.3 秒 = 18 フレーム) に余裕を持たせ、
+## プレイ中でない画面でクールダウンが進まない時に撮影が止まらないようにする
+const COOLDOWN_FRAME_LIMIT: int = 60
 
 
 ## tree の準備が終わってから _run() を始める (シーンの追加は _initialize() の後でないとできない)
@@ -26,14 +31,17 @@ func _run() -> void:
 
 ## 撮影する画面の並び (起動直後のタイトル → プレイ開始 → 段差の手前でジャンプした瞬間 → 段差の上 →
 ## 右へスクロールして壁の手前 → ポーズ → 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス →
-## 敵に触れ続けたゲームオーバー → リトライしてゴールに入ったステージクリア)。
+## 敵に触れ続けたゲームオーバー → リトライしてゴールに入ったステージクリア →
+## 光源の手前で見える反転区間の予兆 → 高い光源の反転区間で逆へ動いて縮んだ影の攻撃 → 低い光源の反転区間で伸びた影の攻撃)。
 ## 失敗した撮影は _capture() が quit(1) 済みなので、false を受けたらそのまま抜ける。
 func _capture_scenes() -> bool:
 	if not await _capture_title():
 		return false
 	if not await _capture_terrain_and_scroll():
 		return false
-	return await _capture_combat()
+	if not await _capture_combat():
+		return false
+	return await _capture_lights()
 
 
 ## メインシーンを置いてタイトルを撮り、Enter キーでプレイを始めた直後を撮る
@@ -115,6 +123,64 @@ func _capture_combat() -> bool:
 	retried.queue_free()
 	await process_frame
 	return true
+
+
+## ステージクリアの画面のまま新しいメインシーンを置き、Enter キーでタイトルに戻してからもう一度 Enter キーで
+## プレイを始め、読み込み直されたメインシーンで光源の予兆と反転区間の影を撮る
+func _capture_lights() -> bool:
+	_add_main()
+	await create_timer(0.3).timeout
+	await _hold_keys([KEY_ENTER], 1)
+	await process_frame
+	await _wait_physics_frames(2)
+	await _hold_keys([KEY_ENTER], 1)
+	await _wait_physics_frames(2)
+	var main: Node2D = current_scene
+	var high: Dictionary = Stage.LIGHTS[0]
+	await _place_hero(main, high["x"] - 130.0)
+	if not await _capture("tmp/screenshot-light-omen.png"):
+		return false
+	await _hold_keys([KEY_RIGHT], 47)
+	if not await _capture_attack(main, "tmp/screenshot-light-reverse.png"):
+		return false
+	var low: Dictionary = Stage.LIGHTS[1]
+	await _place_hero(main, low["x"] + low["zone"] / 2.0)
+	if not await _capture_attack(main, "tmp/screenshot-light-long.png"):
+		return false
+	main.queue_free()
+	await process_frame
+	return true
+
+
+## 前の攻撃から次の攻撃を始められるまで待って攻撃キーを押し、影の攻撃が表示されている間に path へ撮影する。
+## 攻撃が始まらなければ quit(1) する
+func _capture_attack(main: Node2D, path: String) -> bool:
+	var hero: Hero = main.get_node("Hero")
+	var frames_left: int = COOLDOWN_FRAME_LIMIT
+	while hero.attack_cooldown_left > 0.0 and frames_left > 0:
+		await physics_frame
+		frames_left -= 1
+	if frames_left == 0:
+		push_error("攻撃のクールダウンが %d フレーム以内に終わらない: %s" % [COOLDOWN_FRAME_LIMIT, path])
+		quit(1)
+		return false
+	await _hold_keys([KEY_J], 1)
+	if not main.get_node("Shadow/Attack").visible:
+		push_error("影の攻撃が表示されていない: %s" % path)
+		quit(1)
+		return false
+	return await _capture(path)
+
+
+## 主人公の体の中心を center_x に置いて地面に立たせ、出現済みの敵を消す (敵に触れて半透明になった姿を撮らない)
+func _place_hero(main: Node2D, center_x: float) -> void:
+	var hero: Hero = main.get_node("Hero")
+	hero.position = Vector2(center_x - Hero.SIZE.x / 2.0, Stage.GROUND_Y - Hero.SIZE.y)
+	hero.velocity = Vector2.ZERO
+	await _wait_physics_frames(3)
+	for enemy: Node in main.get_node("Enemies").get_children():
+		enemy.queue_free()
+	await _wait_physics_frames(1)
 
 
 ## メインシーンを置き、画面の遷移で読み込み直せるよう current_scene にする
