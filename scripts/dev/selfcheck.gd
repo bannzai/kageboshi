@@ -1,6 +1,6 @@
 extends SceneTree
-## 移動・スクロール・影の位置・攻撃・敵・体力・同期ボーナス・光源による影の反転と倍率の計算、入力割り当て、
-## シーンのロードの検証。
+## 移動・スクロール・影の位置・攻撃・敵・体力・同期ボーナス・光源による影の反転と倍率・影縫い・引き寄せの計算、
+## 入力割り当て、シーンのロードの検証。
 ## 実行方法は AGENTS.md を参照。release ビルドで assert が消えるため、明示的な判定と exit code で結果を返す。
 
 ## 起動検証 (main_scene の --quit) ではロードされない遷移先も含めた全シーン
@@ -18,8 +18,10 @@ const STAGE_SCRIPT := preload("res://scripts/stage.gd")
 const ENEMY_SCRIPT := preload("res://scripts/enemy.gd")
 ## 同期ボーナスの計算
 const COMBAT_SCRIPT := preload("res://scripts/combat.gd")
-## 体力と無敵時間を持つ autoload のスクリプト
+## 体力と無敵時間・影縫いのゲージを持つ autoload のスクリプト
 const GAME_STATE_SCRIPT := preload("res://scripts/game_state.gd")
+## 影縫いと引き寄せの計算
+const STITCH_SCRIPT := preload("res://scripts/shadow_stitch.gd")
 ## 光源による影の反転と倍率の計算
 const LIGHT_SCRIPT := preload("res://scripts/light.gd")
 ## 反転と倍率の検証に使う光源 (倍率 1 の高さ)。Stage.LIGHTS を変えても期待値が変わらないように、検証用に置く
@@ -43,10 +45,14 @@ func _initialize() -> void:
 	_check_game_state()
 	_check_screen_transitions()
 	_check_sync_hit()
+	_check_gauge()
+	_check_next_pin()
+	_check_stitch_offset()
 	_check_light_side()
 	_check_light_reversal()
 	_check_shadow_scale()
 	_check_stage_lights()
+	_check_shadow_with_offset()
 	_check_input_map()
 	_check_scenes()
 	if failed:
@@ -262,6 +268,102 @@ func _check_sync_hit() -> void:
 	)
 
 
+## autoload とは別のインスタンスで、ゲージの消費・ゲージ切れ・回復を確認して free する
+func _check_gauge() -> void:
+	var state: Node = GAME_STATE_SCRIPT.new()
+	var full_time: float = GAME_STATE_SCRIPT.MAX_GAUGE / GAME_STATE_SCRIPT.GAUGE_DRAIN
+	_check(state.gauge == GAME_STATE_SCRIPT.MAX_GAUGE and state.has_gauge(), "ゲージ: 最初は満タン")
+	state.spend_gauge(full_time / 2.0)
+	_check(
+		is_equal_approx(state.gauge, GAME_STATE_SCRIPT.MAX_GAUGE / 2.0),
+		"ゲージ: 縫い止められる時間の半分でゲージが半分に減る"
+	)
+	state.spend_gauge(full_time)
+	_check(state.gauge == 0.0 and not state.has_gauge(), "ゲージ: 使い切ると 0 で止まり縫い止められない")
+	state.recover_gauge(1.0)
+	_check(
+		is_equal_approx(state.gauge, GAME_STATE_SCRIPT.GAUGE_RECOVER) and state.has_gauge(),
+		"ゲージ: 同期している間に回復する"
+	)
+	state.recover_gauge(GAME_STATE_SCRIPT.MAX_GAUGE / GAME_STATE_SCRIPT.GAUGE_RECOVER)
+	_check(state.gauge == GAME_STATE_SCRIPT.MAX_GAUGE, "ゲージ: 回復は最大値で止まる")
+	state.spend_gauge(full_time)
+	state.reset()
+	_check(state.gauge == GAME_STATE_SCRIPT.MAX_GAUGE, "ゲージ: reset で満タンに戻る")
+	state.free()
+
+
+## 縫い止めの開始・継続・解除と、引き寄せ・ゲージ切れの間は縫い止めないこと。
+## 各行は [前の縫い止め, 影縫いを押した瞬間, 押している, 逆の操作を押した瞬間, 押している,
+## 引き寄せの途中, ゲージが残っている, 期待する縫い止め, 検証の内容]
+func _check_next_pin() -> void:
+	var none: int = STITCH_SCRIPT.Pin.NONE
+	var shadow: int = STITCH_SCRIPT.Pin.SHADOW
+	var hero: int = STITCH_SCRIPT.Pin.HERO
+	var cases: Array[Array] = [
+		[none, false, false, false, false, false, true, none, "押さなければ同期のまま"],
+		[none, true, true, false, false, false, true, shadow, "影縫いを押すと影を縫い止める"],
+		[shadow, false, true, false, false, false, true, shadow, "押している間は続く"],
+		[shadow, false, false, false, false, false, true, none, "離すと解除する"],
+		[none, false, false, true, true, false, true, hero, "逆の操作で主人公を止める"],
+		[hero, false, false, false, true, false, true, hero, "逆の操作も押している間は続く"],
+		[none, false, true, false, false, false, true, none, "押しっぱなしでは始まらない"],
+		[shadow, false, true, false, false, false, false, none, "ゲージ切れで解除する"],
+		[none, true, true, false, false, false, false, none, "ゲージが無ければ始まらない"],
+		[shadow, false, true, false, false, true, true, none, "引き寄せると解除する"],
+	]
+	for row: Array in cases:
+		var next: int = STITCH_SCRIPT.next_pin(
+			row[0], row[1], row[2], row[3], row[4], row[5], row[6]
+		)
+		_check(next == row[7], "縫い止め: " + row[8])
+
+
+## 縫い止め・影だけの移動・解除・引き寄せで、影のずれが期待どおりに変わること
+func _check_stitch_offset() -> void:
+	var synced: Vector2 = Vector2(1000.0, 256.0 + MAIN_SCRIPT.SCREEN_HEIGHT)
+	var pinned: Vector2 = Vector2(900.0, 200.0 + MAIN_SCRIPT.SCREEN_HEIGHT)
+	_check(
+		STITCH_SCRIPT.pinned_offset(pinned, synced) == pinned - synced,
+		"ずれ: 縫い止めた影は縫い止めた位置に残る"
+	)
+	var far: Vector2 = synced + Vector2(-STITCH_SCRIPT.MAX_OFFSET - 100.0, 0.0)
+	_check(
+		STITCH_SCRIPT.pinned_offset(far, synced).x == -STITCH_SCRIPT.MAX_OFFSET,
+		"ずれ: 影は主人公から離れられる距離より遠くへは残らない"
+	)
+	var at_left: Vector2 = Vector2(100.0, synced.y)
+	_check(
+		STITCH_SCRIPT.clamp_offset(Vector2(-300.0, 0.0), at_left).x == -at_left.x,
+		"ずれ: 影はステージの左端より外に出ない"
+	)
+	var at_right: Vector2 = Vector2(STAGE_SCRIPT.WIDTH - HERO_SCRIPT.SIZE.x - 100.0, synced.y)
+	_check(
+		STITCH_SCRIPT.clamp_offset(Vector2(300.0, 0.0), at_right).x == 100.0,
+		"ずれ: 影はステージの右端より外に出ない"
+	)
+	var run: Vector2 = STITCH_SCRIPT.running_offset(Vector2.ZERO, 1.0, synced, 0.25)
+	_check(
+		run == Vector2(HERO_SCRIPT.MOVE_SPEED * 0.25, 0.0),
+		"ずれ: 主人公を止めている間は影だけが左右入力で主人公の速さで動く"
+	)
+	_check(
+		STITCH_SCRIPT.released_offset(Vector2(-120.0, -80.0)) == Vector2(-120.0, 0.0),
+		"ずれ: 縫い止めを解くと横のずれだけが残る"
+	)
+	var pull_step: float = STITCH_SCRIPT.PULL_SPEED * 0.1
+	_check(
+		STITCH_SCRIPT.pulled_offset(Vector2(-300.0, 0.0), 0.1).is_equal_approx(
+			Vector2(-300.0 + pull_step, 0.0)
+		),
+		"引き寄せ: 引き寄せの速さで主人公へ近づく"
+	)
+	_check(
+		STITCH_SCRIPT.pulled_offset(Vector2(-10.0, 0.0), 0.1) == Vector2.ZERO,
+		"引き寄せ: ずれが 1 フレームで縮む距離より小さければちょうど同期に戻る"
+	)
+
+
 ## 光源の左 (手前)・真下・右 (またいだ先) の判定
 func _check_light_side() -> void:
 	_check(LIGHT_SCRIPT.side_of(1000.0, 999.0) == -1.0, "光源: 光源より左にいれば左側")
@@ -394,9 +496,47 @@ func _check_shadow_in_zone(light: Dictionary, i: int) -> void:
 	)
 
 
+## 影縫いのずれがある時の影の体・攻撃の範囲は、同期中の影の体・攻撃の範囲をずれの分だけ動かしたもので、
+## 大きさ・向きは主人公がいる光源の反転区間で決まる (Stage.LIGHTS の最初の光源の反転区間の中で確かめる)
+func _check_shadow_with_offset() -> void:
+	var light: Dictionary = STAGE_SCRIPT.LIGHTS[0]
+	var inside: Vector2 = Vector2(
+		light["x"] + light["zone"] / 2.0 - HERO_SCRIPT.SIZE.x / 2.0,
+		STAGE_SCRIPT.GROUND_Y - HERO_SCRIPT.SIZE.y
+	)
+	var offset: Vector2 = Vector2(-120.0, 0.0)
+	var body: Rect2 = MAIN_SCRIPT.shadow_body_rect(inside)
+	_check(
+		MAIN_SCRIPT.shadow_body_rect(inside, offset).is_equal_approx(
+			Rect2(body.position + offset, body.size)
+		),
+		"影縫いと光源: ずれた影の体は、反転区間の同期中の影の体をずれの分だけ動かした位置と大きさ"
+	)
+	var attack: Rect2 = MAIN_SCRIPT.shadow_attack_area(inside, 1.0)
+	_check(
+		MAIN_SCRIPT.shadow_attack_area(inside, 1.0, offset).is_equal_approx(
+			Rect2(attack.position + offset, attack.size)
+		),
+		"影縫いと光源: ずれた影の攻撃は、反転区間の同期中の影の攻撃をずれの分だけ動かした向き・リーチ"
+	)
+	_check(
+		MAIN_SCRIPT.shadow_body_rect(inside, Vector2.ZERO) == body,
+		"影縫いと光源: ずれが 0 なら影の体は同期中と同じ"
+	)
+
+
 func _check_input_map() -> void:
 	for action: String in [
-		"move_left", "move_right", "jump", "attack", "confirm", "pause", "quit_to_title"
+		"move_left",
+		"move_right",
+		"jump",
+		"attack",
+		"confirm",
+		"pause",
+		"quit_to_title",
+		"pin_shadow",
+		"pin_hero",
+		"pull_shadow",
 	]:
 		_check(InputMap.has_action(action), "InputMap: %s アクションがある" % action)
 		var has_key: bool = false

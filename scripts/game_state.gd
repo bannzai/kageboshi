@@ -1,6 +1,6 @@
 extends Node
 ## ゲーム進行の状態 (autoload の GameState)。いま表示している画面 (タイトル・プレイ中・ポーズ・ゲームオーバー・
-## ステージクリア) と、主人公と影で共有する体力、被弾直後の無敵時間を持つ。
+## ステージクリア) と、主人公と影で共有する体力、被弾直後の無敵時間、影縫いのゲージを持つ。
 ## 体力が 0 になるとゲームオーバーの画面に移る。
 
 ## 表示している画面。ステージが進むのは PLAYING の間だけ
@@ -12,6 +12,12 @@ enum Command { CONFIRM, PAUSE, QUIT }
 const MAX_HP: int = 5
 ## 被弾してから次のダメージを受けない時間 (秒)。敵に触れ続けても毎フレーム減らないようにする
 const INVINCIBLE_TIME: float = 1.0
+## 影縫いのゲージの最大値
+const MAX_GAUGE: float = 1.0
+## 縫い止めている間に 1 秒で減るゲージ。満タンから 2 秒縫い止められる
+const GAUGE_DRAIN: float = 0.5
+## 同期している間に 1 秒で回復するゲージ。空から 4 秒で満タンに戻る
+const GAUGE_RECOVER: float = 0.25
 ## 画面ごとに受け付ける操作と、その操作で移る画面。ここに無い操作はその画面では何もしない。
 ## ゲームオーバーとステージクリアへは操作ではなく、体力 (take_damage) とゴール (clear_stage) で移る
 const TRANSITIONS: Dictionary = {
@@ -28,12 +34,15 @@ var screen: Screen = Screen.TITLE
 var hp: int = MAX_HP
 ## 無敵の残り時間 (秒)。0 より大きい間はダメージを受けない
 var invincible_left: float = 0.0
+## 影縫いのゲージの残り。0 の間は縫い止められない
+var gauge: float = MAX_GAUGE
 
 
-## ステージの開始時の体力に戻す
+## ステージの開始時の体力とゲージに戻す
 func reset() -> void:
 	hp = MAX_HP
 	invincible_left = 0.0
+	gauge = MAX_GAUGE
 
 
 ## ステージが進む画面 (プレイ中) か
@@ -66,6 +75,21 @@ func take_damage(amount: int) -> bool:
 ## delta 秒だけ無敵時間を進める
 func tick(delta: float) -> void:
 	invincible_left = maxf(invincible_left - delta, 0.0)
+
+
+## ゲージが残っていて縫い止められるか
+func has_gauge() -> bool:
+	return gauge > 0.0
+
+
+## delta 秒縫い止めた分だけゲージを減らす
+func spend_gauge(delta: float) -> void:
+	gauge = maxf(gauge - GAUGE_DRAIN * delta, 0.0)
+
+
+## delta 秒同期した分だけゲージを回復する
+func recover_gauge(delta: float) -> void:
+	gauge = minf(gauge + GAUGE_RECOVER * delta, MAX_GAUGE)
 
 
 ## プレイ中にゴールへ着いた時に、ステージクリアの画面に移る。プレイ中でなければ何もしない

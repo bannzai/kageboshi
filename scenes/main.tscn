@@ -60,6 +60,15 @@ offset_bottom = 48.0
 mouse_filter = 2
 color = Color(1, 0.93, 0.7, 0.85)
 
+[node name="Needle" type="ColorRect" parent="Hero"]
+visible = false
+offset_left = 18.0
+offset_top = 40.0
+offset_right = 22.0
+offset_bottom = 76.0
+mouse_filter = 2
+color = Color(0.25, 0.25, 0.3, 1)
+
 [node name="Shadow" type="Node2D" parent="."]
 
 [node name="Body" type="ColorRect" parent="Shadow"]
@@ -76,6 +85,15 @@ offset_right = 88.0
 offset_bottom = 48.0
 mouse_filter = 2
 color = Color(0.5, 0.52, 0.62, 0.85)
+
+[node name="Needle" type="ColorRect" parent="Shadow"]
+visible = false
+offset_left = 18.0
+offset_top = 40.0
+offset_right = 22.0
+offset_bottom = 76.0
+mouse_filter = 2
+color = Color(0.9, 0.9, 1, 1)
 
 [node name="Camera" type="Camera2D" parent="."]
 anchor_mode = 0
@@ -105,6 +123,29 @@ offset_bottom = 40.0
 theme_override_colors/font_color = Color(0.1, 0.1, 0.12, 1)
 theme_override_font_sizes/font_size = 22
 text = "HP 5 / 5"
+
+[node name="GaugeLabel" type="Label" parent="Overlay"]
+offset_left = 16.0
+offset_top = 40.0
+offset_right = 96.0
+offset_bottom = 66.0
+theme_override_colors/font_color = Color(0.1, 0.1, 0.12, 1)
+theme_override_font_sizes/font_size = 16
+text = "STITCH"
+
+[node name="GaugeBar" type="ColorRect" parent="Overlay"]
+offset_left = 96.0
+offset_top = 46.0
+offset_right = 256.0
+offset_bottom = 60.0
+mouse_filter = 2
+color = Color(0.25, 0.25, 0.3, 1)
+
+[node name="Fill" type="ColorRect" parent="Overlay/GaugeBar"]
+offset_right = 160.0
+offset_bottom = 14.0
+mouse_filter = 2
+color = Color(0.45, 0.38, 0.85, 1)
 
 [node name="Screens" type="CanvasLayer" parent="."]
 layer = 2
