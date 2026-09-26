@@ -4,8 +4,9 @@ extends Node2D
 ## 左右の動きが逆になり、光源の高さで伸び縮みする (scripts/light.gd)。
 ## 影縫いで影か主人公を縫い止めると上下の位置がずれ、引き寄せで同期に戻る (scripts/shadow_stitch.gd)。
 ## 敵は上下どちらの画面にも出て、主人公・影のどちらが触れても共有の体力 (GameState) が減る。
-## ステージが進むのはプレイ中の画面の間だけで、タイトル・ポーズ・ゲームオーバー・ステージクリアの画面は
+## ステージが進むのはプレイ中の画面の間だけで、タイトル・ポーズ・ゲームオーバー・ステージクリア・設定の画面は
 ## GameState の画面に合わせて重ねて表示する。ステージを最初からやり直す時はこのシーンを読み込み直す。
+## ゴールに着いたらステージをクリア済みとして SaveData に保存する。
 
 ## 地形・敵の出現位置・光源の定義
 const Stage := preload("res://scripts/stage.gd")
@@ -22,6 +23,8 @@ const ShadowStitch := preload("res://scripts/shadow_stitch.gd")
 ## autoload の GameState のスクリプト。autoload 名の識別子で参照すると、--script で起動する
 ## scripts/dev/ の検証が autoload の登録前に main.gd をコンパイルして失敗するため、ノードとして取る
 const GameStateScript := preload("res://scripts/game_state.gd")
+## autoload の SaveData のスクリプト (GameStateScript と同じ理由でノードとして取る)
+const SaveDataScript := preload("res://scripts/save_data.gd")
 ## 敵のシーン
 const ENEMY_SCENE: PackedScene = preload("res://scenes/enemy.tscn")
 
@@ -54,11 +57,21 @@ const REVERSE_ZONE_COLOR: Color = Color(0.5, 0.45, 0.3, 0.35)
 const REVERSE_ARROW_SPACING: float = 48.0
 ## ゴールの目印の色
 const GOAL_COLOR: Color = Color(1.0, 0.82, 0.25, 0.45)
-## 画面を切り替える入力のアクションと、GameState に送る操作
+## 画面を切り替える入力のアクションと、GameState に送る操作。設定画面を閉じる操作 (BACK) は、設定画面のキー割り当ての
+## 入力と区別するため scripts/settings_menu.gd が送る (設定画面は BACK 以外の操作を受け付けないので、
+## キー割り当てで押したキーがここで画面を切り替えることはない)
 const SCREEN_ACTIONS: Dictionary = {
 	"confirm": GameStateScript.Command.CONFIRM,
 	"pause": GameStateScript.Command.PAUSE,
 	"quit_to_title": GameStateScript.Command.QUIT,
+	"open_settings": GameStateScript.Command.SETTINGS,
+}
+## 画面ごとの操作の案内 ([アクション, 操作の説明] の並び)。キーの表示は今のキー割り当てから作る
+const SCREEN_HINTS: Dictionary = {
+	GameStateScript.Screen.TITLE: [["confirm", "Start"], ["open_settings", "Settings"]],
+	GameStateScript.Screen.PAUSED: [["pause", "Resume"], ["quit_to_title", "Title"]],
+	GameStateScript.Screen.GAME_OVER: [["confirm", "Retry"], ["quit_to_title", "Title"]],
+	GameStateScript.Screen.CLEAR: [["confirm", "Title"]],
 }
 
 ## カメラの横スクロール量 (画面の左端のステージ上の x)
@@ -85,6 +98,8 @@ var pulling: bool = false
 
 ## 表示している画面と、主人公と影で共有する体力 (autoload の GameState)
 @onready var game_state: GameStateScript = get_node("/root/GameState")
+## クリアしたステージとキー割り当ての保存 (autoload の SaveData)
+@onready var save_data: SaveDataScript = get_node("/root/SaveData")
 ## 上の画面の主人公
 @onready var hero: Hero = $Hero
 ## 下の画面の影。位置は _sync_shadow() で主人公とずれから導く
@@ -125,7 +140,12 @@ var pulling: bool = false
 	GameStateScript.Screen.PAUSED: $Screens/Pause,
 	GameStateScript.Screen.GAME_OVER: $Screens/GameOver,
 	GameStateScript.Screen.CLEAR: $Screens/Clear,
+	GameStateScript.Screen.SETTINGS: $Screens/Settings,
 }
+## タイトルに出す進行 (クリアしたステージの数)
+@onready var progress_label: Label = $Screens/Title/Progress
+## タイトルに出す、壊れた保存データを既定値に戻した知らせ
+@onready var broken_save_label: Label = $Screens/Title/BrokenSave
 
 
 func _ready() -> void:
@@ -183,8 +203,8 @@ func _step_stage(delta: float) -> void:
 		enemy.physics_step(delta)
 	_resolve_attack_hits()
 	_resolve_contact_damage()
-	if hero.body_rect().intersects(Stage.GOAL):
-		game_state.clear_stage()
+	if hero.body_rect().intersects(Stage.GOAL) and game_state.clear_stage():
+		save_data.mark_cleared(Stage.ID)
 
 
 ## lane の画面の、x から左へ patrol の幅を往復する敵を置く。floor_y は足元の y 座標 (上の画面の座標)
@@ -422,20 +442,37 @@ func _show_sync_effect() -> void:
 	sync_flash_tween.tween_property(sync_flash, "modulate:a", 0.0, SYNC_EFFECT_TIME)
 
 
-## 体力・影縫いのゲージ・画面ごとの表示と、無敵の間の主人公・影の半透明を GameState に合わせる
+## 体力・影縫いのゲージ・画面ごとの表示と、無敵の間の主人公・影の半透明を GameState に合わせる。タイトルの進行と
+## 操作の案内は SaveData の保存データとキー割り当てに合わせる
 func _update_hud() -> void:
 	hp_label.text = "HP %d / %d" % [game_state.hp, game_state.MAX_HP]
 	gauge_fill.size.x = gauge_bar.size.x * game_state.gauge / game_state.MAX_GAUGE
-	var in_stage: bool = game_state.screen != GameStateScript.Screen.TITLE
+	var in_stage: bool = game_state.screen not in [
+		GameStateScript.Screen.TITLE, GameStateScript.Screen.SETTINGS
+	]
 	hp_label.visible = in_stage
 	gauge_label.visible = in_stage
 	gauge_bar.visible = in_stage
 	for screen: GameStateScript.Screen in screen_panels:
 		var panel: Control = screen_panels[screen]
 		panel.visible = game_state.screen == screen
+	var hints: Array = SCREEN_HINTS.get(game_state.screen, [])
+	if not hints.is_empty():
+		screen_panels[game_state.screen].get_node("Hint").text = hint_text(hints)
+	progress_label.text = "Cleared stages: %d" % save_data.cleared_stages.size()
+	progress_label.visible = not save_data.cleared_stages.is_empty()
+	broken_save_label.visible = save_data.loaded_broken
 	var alpha: float = INVINCIBLE_ALPHA if game_state.is_invincible() else 1.0
 	hero.modulate.a = alpha
 	shadow.modulate.a = alpha
+
+
+## hints ([アクション, 操作の説明] の並び) の操作の案内。キーは各アクションの今の 1 つ目のキー (「Enter: Start」)
+static func hint_text(hints: Array) -> String:
+	var parts: PackedStringArray = []
+	for hint: Array in hints:
+		parts.append("%s: %s" % [SaveDataScript.first_key_name(hint[0]), hint[1]])
+	return "    ".join(parts)
 
 
 ## 体の左上が hero_position の主人公の同期中の影の位置 (伸び縮みさせる前の、主人公と同じ大きさの体の左上)。
