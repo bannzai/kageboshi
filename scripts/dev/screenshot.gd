@@ -7,8 +7,10 @@ extends SceneTree
 const MAIN_SCENE: PackedScene = preload("res://scenes/main.tscn")
 ## 敵の出現先の画面 (Lane)
 const Combat := preload("res://scripts/combat.gd")
-## 地面の位置
+## 地面と光源の位置
 const Stage := preload("res://scripts/stage.gd")
+## 主人公のスクリプト (体の大きさ)
+const Hero := preload("res://scripts/hero.gd")
 
 
 ## tree の準備が終わってから _run() を始める (シーンの追加は _initialize() の後でないとできない)
@@ -23,12 +25,15 @@ func _run() -> void:
 
 
 ## 撮影する画面の並び (起動直後 → 段差の手前でジャンプした瞬間 → 段差の上 → 右へスクロールして壁の手前 →
-## 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス → 敵に触れ続けたゲームオーバー)。
+## 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス → 敵に触れ続けたゲームオーバー →
+## 光源の手前で見える反転区間の予兆 → 高い光源の反転区間で逆へ動いて縮んだ影の攻撃 → 低い光源の反転区間で伸びた影の攻撃)。
 ## 失敗した撮影は _capture() が quit(1) 済みなので、false を受けたらそのまま抜ける。
 func _capture_scenes() -> bool:
 	if not await _capture_terrain_and_scroll():
 		return false
-	return await _capture_combat()
+	if not await _capture_combat():
+		return false
+	return await _capture_lights()
 
 
 func _capture_terrain_and_scroll() -> bool:
@@ -83,6 +88,39 @@ func _capture_combat() -> bool:
 	main.queue_free()
 	await process_frame
 	return true
+
+
+func _capture_lights() -> bool:
+	var main: Node2D = MAIN_SCENE.instantiate()
+	root.add_child(main)
+	await create_timer(0.3).timeout
+	var high: Dictionary = Stage.LIGHTS[0]
+	await _place_hero(main, high["x"] - 130.0)
+	if not await _capture("tmp/screenshot-light-omen.png"):
+		return false
+	await _hold_keys([KEY_RIGHT], 47)
+	await _hold_keys([KEY_J], 1)
+	if not await _capture("tmp/screenshot-light-reverse.png"):
+		return false
+	var low: Dictionary = Stage.LIGHTS[1]
+	await _place_hero(main, low["x"] + low["zone"] / 2.0)
+	await _hold_keys([KEY_J], 1)
+	if not await _capture("tmp/screenshot-light-long.png"):
+		return false
+	main.queue_free()
+	await process_frame
+	return true
+
+
+## 主人公の体の中心を center_x に置いて地面に立たせ、出現済みの敵を消す (敵に触れて半透明になった姿を撮らない)
+func _place_hero(main: Node2D, center_x: float) -> void:
+	var hero: Hero = main.get_node("Hero")
+	hero.position = Vector2(center_x - Hero.SIZE.x / 2.0, Stage.GROUND_Y - Hero.SIZE.y)
+	hero.velocity = Vector2.ZERO
+	await _wait_physics_frames(3)
+	for enemy: Node in main.get_node("Enemies").get_children():
+		enemy.queue_free()
+	await _wait_physics_frames(1)
 
 
 ## 描画が反映されるまで 2 フレーム待ってから viewport を path に PNG で保存する。失敗したら quit(1) する

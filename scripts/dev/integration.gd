@@ -1,10 +1,13 @@
 extends SceneTree
 ## キー入力 (InputMap を通る InputEventKey) でメインシーンの主人公を動かし、地形との当たり判定・スクロール、
-## 下の画面の影が同じ動き・同じ攻撃をすること、敵を倒す・ダメージを受ける・ゲームオーバー・同期ボーナスを
-## 検証する。実行方法は AGENTS.md を参照。失敗したら quit(1) で終わる。
+## 下の画面の影が同じ動き・同じ攻撃をすること、敵を倒す・ダメージを受ける・ゲームオーバー・同期ボーナス、
+## 光源をまたいだ反転区間で影の左右の動きと攻撃の向きが逆になり、光源の高さで伸び縮みすることを検証する。
+## 実行方法は AGENTS.md を参照。失敗したら quit(1) で終わる。
 
-## 地形の定義 (段差・壁・地面の位置の期待値に使う)
+## 地形・光源の定義 (段差・壁・地面・光源の位置の期待値に使う)
 const Stage := preload("res://scripts/stage.gd")
+## 光源の高さから影の倍率を求める計算
+const Light := preload("res://scripts/light.gd")
 ## 主人公のスクリプト (体の大きさ)
 const Hero := preload("res://scripts/hero.gd")
 ## 敵のスクリプト (体力)
@@ -17,6 +20,9 @@ const POSITION_TOLERANCE: float = 1.0
 const STEP: Rect2 = Rect2(560.0, 272.0, 160.0, 48.0)
 ## 越えられない高さの壁 (Stage.TERRAIN の 5 番目)
 const WALL: Rect2 = Rect2(1400.0, 160.0, 60.0, 160.0)
+## キーを押し続けて主人公を目標の位置まで動かす時の、待つ物理フレーム数の上限。移動の速さ (320 px/秒) で
+## 反転区間 (200 px) を抜けるのにかかる約 40 フレームに余裕を持たせる
+const MOVE_FRAME_LIMIT: int = 180
 
 ## 検証が 1 件でも失敗したか。true なら exit code 1 で終わる
 var failed: bool = false
@@ -41,6 +47,11 @@ func _run() -> void:
 		main = await _start_main()
 		await _check_attack_and_sync(main)
 		await _check_damage_and_game_over(main, game_state)
+		main.queue_free()
+		main = await _start_main()
+		_check_light_omen(main)
+		for light: Dictionary in Stage.LIGHTS:
+			await _check_light_reversal(main, light)
 		main.queue_free()
 		await process_frame
 	if failed:
@@ -133,6 +144,102 @@ func _check_damage_and_game_over(main: Node2D, game_state: Node) -> void:
 	var over_x: float = hero.position.x
 	await _hold_keys([KEY_RIGHT], 20)
 	_check(absf(hero.position.x - over_x) < POSITION_TOLERANCE, "ゲームオーバー: 操作を受け付けない")
+
+
+## 各光源の反転区間の予兆として、下の画面の反転区間と同じ位置・大きさの帯が置かれている
+func _check_light_omen(main: Node2D) -> void:
+	for light: Dictionary in Stage.LIGHTS:
+		var zone: Rect2 = Rect2(light["x"], main.SCREEN_HEIGHT, light["zone"], Stage.GROUND_Y)
+		var found: bool = false
+		for child: Node in main.get_node("Lights").get_children():
+			found = found or (child is ColorRect and Rect2(child.position, child.size) == zone)
+		_check(found, "予兆: 光源 (x = %d) の反転区間に下の画面の帯がある" % int(light["x"]))
+
+
+## light (Stage.LIGHTS の要素) の手前から右キーで進むと、光源をまたいだ反転区間で影だけが左へ、光源の倍率の分だけ
+## 動き、左キーでは影が右へ動く。反転区間では影の攻撃が主人公と逆向きに倍率のリーチで出て、影の後ろ (左) にいる
+## 下の画面の敵に当たる。反転区間を抜けると影が主人公の真下に戻る
+func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
+	var hero: Hero = main.get_node("Hero")
+	var shadow: Node2D = main.get_node("Shadow")
+	var label: String = "光源 (x = %d)" % int(light["x"])
+	var scale: float = Light.shadow_scale(light["height"])
+	hero.position = Vector2(light["x"] - 80.0 - Hero.SIZE.x / 2.0, Stage.GROUND_Y - Hero.SIZE.y)
+	hero.velocity = Vector2.ZERO
+	await _wait_physics_frames(3)
+	_clear_enemies(main)
+	_check_synced(main, label + " の手前")
+
+	await _hold_key_until(KEY_RIGHT, func() -> bool: return _center_x(hero) >= light["x"] + 20.0)
+	var hero_x: float = hero.position.x
+	var shadow_x: float = shadow.position.x
+	await _hold_keys([KEY_RIGHT], 6)
+	_check(hero.position.x > hero_x, "%s: 反転区間で右キーを押すと主人公は右へ進む" % label)
+	_check(shadow.position.x < shadow_x, "%s: 反転区間で右キーを押すと影は左へ進む" % label)
+	_check(
+		is_equal_approx(shadow_x - shadow.position.x, (hero.position.x - hero_x) * scale),
+		"%s: 影の移動量は主人公の移動量に光源の倍率を掛けた量" % label
+	)
+	_check(
+		is_equal_approx(main.get_node("Shadow/Body").size.y, Hero.SIZE.y * scale),
+		"%s: 影の見た目の長さが光源の倍率の分だけ伸び縮みする" % label
+	)
+
+	var behind: Node2D = main.spawn_enemy(
+		Combat.Lane.BOTTOM, shadow.position.x - Enemy.SIZE.x - 4.0, Stage.GROUND_Y, 0.0
+	)
+	await _press_attack()
+	var attack: ColorRect = main.get_node("Shadow/Attack")
+	_check(attack.visible, "%s: 反転区間でも影が攻撃する" % label)
+	_check(
+		attack.global_position.x + attack.size.x <= shadow.global_position.x + POSITION_TOLERANCE,
+		"%s: 右を向いた主人公の影の攻撃は影の左 (主人公と逆向き) に出る" % label
+	)
+	_check(
+		is_equal_approx(attack.size.x, Hero.ATTACK_REACH * scale),
+		"%s: 影の攻撃のリーチが光源の倍率の分だけ伸び縮みする" % label
+	)
+	_check(behind.hp == Enemy.MAX_HP - Combat.BASE_DAMAGE, "%s: 影の後ろ (左) の下の画面の敵に当たる" % label)
+	behind.queue_free()
+
+	hero_x = hero.position.x
+	shadow_x = shadow.position.x
+	await _hold_keys([KEY_LEFT], 6)
+	_check(hero.position.x < hero_x, "%s: 反転区間で左キーを押すと主人公は左へ進む" % label)
+	_check(shadow.position.x > shadow_x, "%s: 反転区間で左キーを押すと影は右へ進む" % label)
+
+	await _hold_key_until(
+		KEY_RIGHT, func() -> bool: return _center_x(hero) >= light["x"] + light["zone"] + 10.0
+	)
+	_check_synced(main, label + " の反転区間を抜けた後")
+	_check(
+		main.get_node("Shadow/Body").size == Hero.SIZE,
+		"%s: 反転区間を抜けると影の見た目の長さが主人公と同じに戻る" % label
+	)
+
+
+## 出現済みの敵をすべて消す (光源の検証で、位置を移した主人公・影に敵が触れないようにする)
+func _clear_enemies(main: Node2D) -> void:
+	for enemy: Node in main.get_node("Enemies").get_children():
+		enemy.queue_free()
+
+
+## 主人公の体の中心の x
+func _center_x(hero: Hero) -> float:
+	return hero.position.x + Hero.SIZE.x / 2.0
+
+
+## physical_keycode のキーを reached が true を返すまで押し続けてから離す。MOVE_FRAME_LIMIT フレーム経っても
+## true にならなければ失敗として記録する
+func _hold_key_until(physical_keycode: Key, reached: Callable) -> void:
+	Input.parse_input_event(_key_event(physical_keycode, true))
+	var frames_left: int = MOVE_FRAME_LIMIT
+	while not reached.call() and frames_left > 0:
+		await physics_frame
+		frames_left -= 1
+	Input.parse_input_event(_key_event(physical_keycode, false))
+	await physics_frame
+	_check(frames_left > 0, "移動: %d フレーム以内に目標の位置へ着く" % MOVE_FRAME_LIMIT)
 
 
 ## 攻撃キーを 1 物理フレームだけ押して離す
