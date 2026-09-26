@@ -41,6 +41,10 @@ const WALL: Rect2 = Rect2(1400.0, 160.0, 60.0, 160.0)
 ## キーを押し続けて主人公を目標の位置まで動かす時の、待つ物理フレーム数の上限。移動の速さ (320 px/秒) で
 ## 反転区間 (200 px) を抜けるのにかかる約 40 フレームに余裕を持たせる
 const MOVE_FRAME_LIMIT: int = 180
+## 最後のメインシーンを消してから終了するまで待つ時間 (秒)。消したシーンが鳴らしていた BGM・効果音の再生は
+## AudioServer がミキシングを数回進めてから解放するため、headless (1 フレームがほぼ 0 秒で進む) で待たずに終了すると
+## 再生がリークとして WARNING / ERROR に出る (CI で実測)。ミキシング数回分に余裕を持たせた値
+const AUDIO_RELEASE_TIME: float = 0.25
 
 ## 検証が 1 件でも失敗したか。true なら exit code 1 で終わる
 var failed: bool = false
@@ -103,6 +107,7 @@ func _run_scenes(game_state: Node, save_data: Node) -> void:
 	await _check_stitch_and_pull(main, game_state)
 	main.queue_free()
 	await process_frame
+	await create_timer(AUDIO_RELEASE_TIME).timeout
 
 
 ## メインシーンを置いてタイトルの画面から Enter キーでプレイを始める。画面の遷移で読み込み直せるよう
