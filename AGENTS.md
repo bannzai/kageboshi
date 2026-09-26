@@ -26,7 +26,7 @@
 | headless 検証の一括実行 (lint → check → selfcheck → integration) | `make test` | exit 0 |
 | スクリーンショット (タイトル・プレイ開始・ジャンプ・段差・スクロール・ポーズ・敵・同期ボーナス・ゲームオーバー・ステージクリア・夕方と夜のステージ・クリアを保存したタイトル・設定画面・壊れた保存データの知らせの見た目。headless の検証では見た目の崩れを検出できない) | `make screenshot` | exit 0 かつ `tmp/screenshot-*.png` が生成される |
 | 起動の録画 (操作なしの起動〜タイトルの表示。起動直後の描画崩れ・真っ黒を検出する) | `make movie` | exit 0 かつ `tmp/movie.mp4` が生成され、末尾のフレームの輝度平均が基準以上 (ffmpeg が必要) |
-| ゲームをエディタなしで起動 (人が遊んで確かめる) | `make run` | ウィンドウが開きメインシーンが表示される |
+| ゲームをエディタなしで起動 (人が遊んで確かめる。アセットのインポートを含む) | `make run` | ウィンドウが開きタイトル画面が表示される |
 | デスクトップエクスポート | `make build-macos` / `make build-windows` / `make build-linux` / `make build-all` | exit 0 で `build/<platform>/` に成果物が生成される |
 
 - 画面や状態を追加したら `scripts/dev/screenshot.gd` の `_capture_scenes()` に撮影を足し、入力で変わる振る舞いは `scripts/dev/integration.gd` に検証を足す
