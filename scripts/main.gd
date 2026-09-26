@@ -4,9 +4,10 @@ extends Node2D
 ## 左右の動きが逆になり、光源の高さで伸び縮みする (scripts/light.gd)。
 ## 敵は上下どちらの画面にも出て、主人公・影のどちらが触れても共有の体力 (GameState) が減る。
 ## ステージが進むのはプレイ中の画面の間だけで、タイトル・ポーズ・ゲームオーバー・ステージクリアの画面は
-## GameState の画面に合わせて重ねて表示する。ステージを最初からやり直す時はこのシーンを読み込み直す。
+## GameState の画面に合わせて重ねて表示する。ステージを最初からやり直す時と次のステージへ進む時は、このシーンを
+## 読み込み直す。遊んでいるステージ (昼・夕方・夜) は GameState が持つ。
 
-## 地形・敵の出現位置・光源の定義
+## ステージ 1 本の地形・敵の出現位置・光源の定義
 const Stage := preload("res://scripts/stage.gd")
 ## 光源による影の反転と倍率の計算
 const Light := preload("res://scripts/light.gd")
@@ -60,7 +61,7 @@ const SCREEN_ACTIONS: Dictionary = {
 
 ## カメラの横スクロール量 (画面の左端のステージ上の x)
 var scroll_x: float = 0.0
-## Stage.SPAWNS のうち出現させた数 (先頭から)
+## ステージの敵の出現位置 (Stage.spawns) のうち出現させた数 (先頭から)
 var spawned_count: int = 0
 ## ステージ開始からの経過時間 (秒)。同期ボーナスの判定の時刻に使う
 var elapsed: float = 0.0
@@ -72,8 +73,10 @@ var recent_hits: Array[Dictionary] = []
 ## 仕切り線の光を消していく途中の Tween。続けて同期ボーナスが出たら止めて光らせ直す
 var sync_flash_tween: Tween = null
 
-## 表示している画面と、主人公と影で共有する体力 (autoload の GameState)
+## 表示している画面と、遊んでいるステージ、主人公と影で共有する体力 (autoload の GameState)
 @onready var game_state: GameStateScript = get_node("/root/GameState")
+## 遊んでいるステージ。シーンを読み込み直すまで変わらない
+@onready var stage: Stage = game_state.current_stage()
 ## 上の画面の主人公
 @onready var hero: Hero = $Hero
 ## 下の画面の影。位置は _sync_shadow() で主人公から導く
@@ -96,6 +99,10 @@ var sync_flash_tween: Tween = null
 @onready var sync_flash: ColorRect = $Overlay/SyncFlash
 ## 体力の表示
 @onready var hp_label: Label = $Overlay/HpLabel
+## 遊んでいるステージの番号と名前の表示
+@onready var stage_label: Label = $Overlay/StageLabel
+## 上の画面の背景。ステージの空の色で塗る
+@onready var sky: ColorRect = $Background/TopScreen
 ## ゴールの目印 (上の画面)
 @onready var goal: ColorRect = $Goal
 ## 画面ごとに重ねる表示。GameState の画面がこのキーの時だけ表示する
@@ -111,8 +118,13 @@ func _ready() -> void:
 	print("kageboshi boot")
 	game_state.reset()
 	sync_flash.color = SYNC_COLOR
-	goal.position = Stage.GOAL.position
-	goal.size = Stage.GOAL.size
+	sky.color = stage.sky
+	stage_label.text = "STAGE %d  %s" % [game_state.stage_index + 1, stage.title]
+	if game_state.is_last_stage():
+		$Screens/Clear/Label.text = "ALL CLEAR"
+		$Screens/Clear/Hint.text = "Enter: Title"
+	goal.position = stage.goal().position
+	goal.size = stage.goal().size
 	goal.color = GOAL_COLOR
 	camera.make_current()
 	_build_terrain()
@@ -156,7 +168,7 @@ func _step_stage(delta: float) -> void:
 		enemy.physics_step(delta)
 	_resolve_attack_hits()
 	_resolve_contact_damage()
-	if hero.body_rect().intersects(Stage.GOAL):
+	if hero.body_rect().intersects(stage.goal()):
 		game_state.clear_stage()
 
 
@@ -171,15 +183,15 @@ func spawn_enemy(lane: Combat.Lane, x: float, floor_y: float, patrol: float) -> 
 	return enemy
 
 
-## Stage.TERRAIN の矩形ごとに、上の画面には当たり判定と見た目を、下の画面には見た目だけを置く。
-## 天井 (Stage.CEILING) は当たり判定だけを置く
+## ステージの地形 (Stage.terrain()) の矩形ごとに、上の画面には当たり判定と見た目を、下の画面には見た目だけを置く。
+## 天井 (Stage.ceiling()) は当たり判定だけを置く
 func _build_terrain() -> void:
-	for rect: Rect2 in Stage.TERRAIN:
+	for rect: Rect2 in stage.terrain():
 		var body: StaticBody2D = _collision_body(rect)
 		body.add_child(_terrain_rect(Rect2(Vector2.ZERO, rect.size), TOP_TERRAIN_COLOR))
 		top_terrain.add_child(body)
 		bottom_terrain.add_child(_terrain_rect(rect, BOTTOM_TERRAIN_COLOR))
-	add_child(_collision_body(Stage.CEILING))
+	add_child(_collision_body(stage.ceiling()))
 
 
 ## area を占める当たり判定
@@ -205,11 +217,11 @@ func _terrain_rect(area: Rect2, color: Color) -> ColorRect:
 	return rect
 
 
-## Stage.LIGHTS の光源ごとに、上の画面には光源 (柱と灯り) と反転区間を照らす光を、下の画面には反転区間で影が
+## ステージの光源 (Stage.lights) ごとに、上の画面には光源 (柱と灯り) と反転区間を照らす光を、下の画面には反転区間で影が
 ## 逆へ動く範囲 (光源から左へ、反転区間の幅に倍率を掛けた幅) の帯と左向きの矢印を置く (反転区間の予兆)。
 ## 帯の幅で影の伸び縮みも前もって分かる。主人公は画面の中央にいるため、反転区間は入る半画面前から見える
 func _build_lights() -> void:
-	for light: Dictionary in Stage.LIGHTS:
+	for light: Dictionary in stage.lights:
 		var x: float = light["x"]
 		var lamp_y: float = Stage.GROUND_Y - light["height"]
 		var beam: Polygon2D = Polygon2D.new()
@@ -241,26 +253,26 @@ func _build_lights() -> void:
 ## 影の位置・長さ・攻撃は主人公と、主人公がいる反転区間の光源から導く
 ## (.claude/rules/shadow-position-derived-from-hero.md)
 func _sync_shadow() -> void:
-	shadow.position = shadow_position(hero.position)
-	var body: Rect2 = shadow_body_rect(hero.position)
+	shadow.position = shadow_position(hero.position, stage.lights)
+	var body: Rect2 = shadow_body_rect(hero.position, stage.lights)
 	shadow_body.position = body.position - shadow.position
 	shadow_body.size = body.size
-	var attack: Rect2 = shadow_attack_area(hero.position, hero.facing)
+	var attack: Rect2 = shadow_attack_area(hero.position, hero.facing, stage.lights)
 	shadow_attack.visible = hero.attack_visual.visible
 	shadow_attack.position = attack.position - shadow.position
 	shadow_attack.size = attack.size
 
 
 func _follow_camera() -> void:
-	scroll_x = scroll_for(hero.position.x + Hero.SIZE.x / 2.0)
+	scroll_x = scroll_for(hero.position.x + Hero.SIZE.x / 2.0, stage.width)
 	camera.position = Vector2(scroll_x, 0.0)
 
 
-## 画面の右端に近づいた Stage.SPAWNS の敵を出現させる
+## 画面の右端に近づいたステージの敵 (Stage.spawns) を出現させる
 func _spawn_due_enemies() -> void:
-	var due: int = Stage.due_spawn_count(scroll_x + SCREEN_WIDTH)
+	var due: int = stage.due_spawn_count(scroll_x + SCREEN_WIDTH)
 	while spawned_count < due:
-		var spawn: Dictionary = Stage.SPAWNS[spawned_count]
+		var spawn: Dictionary = stage.spawns[spawned_count]
 		spawn_enemy(spawn["lane"], spawn["x"], spawn["floor_y"], spawn["patrol"])
 		spawned_count += 1
 
@@ -286,7 +298,7 @@ func _resolve_attack_hits() -> void:
 		return
 	var areas: Array[Rect2] = [
 		Hero.attack_area(hero.position, hero.facing, Hero.ATTACK_REACH),
-		shadow_attack_area(hero.position, hero.facing)
+		shadow_attack_area(hero.position, hero.facing, stage.lights)
 	]
 	var hits: Array[Enemy] = []
 	for enemy: Enemy in _living_enemies():
@@ -322,7 +334,7 @@ func _resolve_attack_hits() -> void:
 
 ## 上の画面の敵が主人公に、下の画面の敵が影に触れていたら体力を減らす
 func _resolve_contact_damage() -> void:
-	var bodies: Array[Rect2] = [hero.body_rect(), shadow_body_rect(hero.position)]
+	var bodies: Array[Rect2] = [hero.body_rect(), shadow_body_rect(hero.position, stage.lights)]
 	for enemy: Enemy in _living_enemies():
 		if bodies[enemy.lane].intersects(enemy.body_rect()):
 			game_state.take_damage(CONTACT_DAMAGE)
@@ -355,6 +367,7 @@ func _show_sync_effect() -> void:
 func _update_hud() -> void:
 	hp_label.text = "HP %d / %d" % [game_state.hp, game_state.MAX_HP]
 	hp_label.visible = game_state.screen != GameStateScript.Screen.TITLE
+	stage_label.visible = hp_label.visible
 	for screen: GameStateScript.Screen in screen_panels:
 		var panel: Control = screen_panels[screen]
 		panel.visible = game_state.screen == screen
@@ -363,44 +376,49 @@ func _update_hud() -> void:
 	shadow.modulate.a = alpha
 
 
-## 体の左上が hero_position の主人公の影の位置 (伸び縮みさせる前の、主人公と同じ大きさの体の左上)。
-## 上の画面 1 つ分下で、横は主人公の体の中心を Light.shadow_center_x() で写した位置 (反転区間の外は主人公と同じ)
-static func shadow_position(hero_position: Vector2) -> Vector2:
+## 体の左上が hero_position の主人公の、光源が lights (Stage.lights の形) のステージでの影の位置 (伸び縮みさせる前の、
+## 主人公と同じ大きさの体の左上)。上の画面 1 つ分下で、横は主人公の体の中心を Light.shadow_center_x() で写した位置
+## (反転区間の外は主人公と同じ)
+static func shadow_position(hero_position: Vector2, lights: Array[Dictionary]) -> Vector2:
 	var half_width: float = Hero.SIZE.x / 2.0
 	return Vector2(
-		Light.shadow_center_x(hero_position.x + half_width, Stage.LIGHTS) - half_width,
+		Light.shadow_center_x(hero_position.x + half_width, lights) - half_width,
 		hero_position.y + SCREEN_HEIGHT
 	)
 
 
-## 体の左上が hero_position の主人公の影の体の矩形。足元と横位置は shadow_position() の体と同じで、
-## 高さを光源の倍率で伸び縮みさせる (敵との接触もこの矩形で判定する)
-static func shadow_body_rect(hero_position: Vector2) -> Rect2:
-	var at: Vector2 = shadow_position(hero_position)
+## 体の左上が hero_position の主人公の、光源が lights のステージでの影の体の矩形。足元と横位置は shadow_position() の
+## 体と同じで、高さを光源の倍率で伸び縮みさせる (敵との接触もこの矩形で判定する)
+static func shadow_body_rect(hero_position: Vector2, lights: Array[Dictionary]) -> Rect2:
+	var at: Vector2 = shadow_position(hero_position, lights)
 	var height: float = (
-		Hero.SIZE.y * Light.shadow_scale_at(hero_position.x + Hero.SIZE.x / 2.0, Stage.LIGHTS)
+		Hero.SIZE.y * Light.shadow_scale_at(hero_position.x + Hero.SIZE.x / 2.0, lights)
 	)
 	return Rect2(at.x, at.y + Hero.SIZE.y - height, Hero.SIZE.x, height)
 
 
-## 体の左上が hero_position で hero_facing を向いている主人公の影の攻撃の範囲。反転区間では主人公と逆を向き、
-## リーチは光源の倍率で伸び縮みする。高さは主人公と同じ (足元から同じ高さに出て、地面に立つ敵に届く)
-static func shadow_attack_area(hero_position: Vector2, hero_facing: float) -> Rect2:
+## 体の左上が hero_position で hero_facing を向いている主人公の、光源が lights のステージでの影の攻撃の範囲。
+## 反転区間では主人公と逆を向き、リーチは光源の倍率で伸び縮みする。高さは主人公と同じ (足元から同じ高さに出て、
+## 地面に立つ敵に届く)
+static func shadow_attack_area(
+	hero_position: Vector2, hero_facing: float, lights: Array[Dictionary]
+) -> Rect2:
 	var center_x: float = hero_position.x + Hero.SIZE.x / 2.0
 	return Hero.attack_area(
-		shadow_position(hero_position),
-		hero_facing * Light.shadow_direction(center_x, Stage.LIGHTS),
-		Hero.ATTACK_REACH * Light.shadow_scale_at(center_x, Stage.LIGHTS)
+		shadow_position(hero_position, lights),
+		hero_facing * Light.shadow_direction(center_x, lights),
+		Hero.ATTACK_REACH * Light.shadow_scale_at(center_x, lights)
 	)
 
 
-## light (Stage.LIGHTS の要素) の反転区間で、影の体の中心が逆へ動く範囲の下の画面の矩形 (地面より上)。
+## light (Stage.lights の要素) の反転区間で、影の体の中心が逆へ動く範囲の下の画面の矩形 (地面より上)。
 ## 光源の x から左へ、反転区間の幅に光源の倍率を掛けた幅
 static func shadow_reverse_range(light: Dictionary) -> Rect2:
 	var width: float = light["zone"] * Light.shadow_scale(light["height"])
 	return Rect2(light["x"] - width, SCREEN_HEIGHT, width, Stage.GROUND_Y)
 
 
-## 主人公の中心が hero_center_x の時の横スクロール量。主人公を画面の中央に置き、ステージの外は映さない
-static func scroll_for(hero_center_x: float) -> float:
-	return clampf(hero_center_x - SCREEN_WIDTH / 2.0, 0.0, Stage.WIDTH - SCREEN_WIDTH)
+## 主人公の中心が hero_center_x の時の、横幅 stage_width のステージの横スクロール量。主人公を画面の中央に置き、
+## ステージの外は映さない
+static func scroll_for(hero_center_x: float, stage_width: float) -> float:
+	return clampf(hero_center_x - SCREEN_WIDTH / 2.0, 0.0, stage_width - SCREEN_WIDTH)
