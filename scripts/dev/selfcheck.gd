@@ -33,6 +33,7 @@ func _initialize() -> void:
 	_check_patrol()
 	_check_enemy_hp()
 	_check_game_state()
+	_check_screen_transitions()
 	_check_sync_hit()
 	_check_input_map()
 	_check_scenes()
@@ -166,10 +167,63 @@ func _check_game_state() -> void:
 	_check(state.hp == 0 and state.is_game_over(), "体力: 0 になったらゲームオーバー")
 	state.tick(GAME_STATE_SCRIPT.INVINCIBLE_TIME)
 	_check(not state.take_damage(1) and state.hp == 0, "体力: ゲームオーバー後は 0 より減らない")
+	_check(
+		state.send(GAME_STATE_SCRIPT.Command.CONFIRM), "体力: ゲームオーバーからのやり直しはステージを作り直す"
+	)
+	_check(
+		state.hp == GAME_STATE_SCRIPT.MAX_HP and state.is_playing(),
+		"体力: ゲームオーバーからやり直すと最大値に戻ってプレイ中になる"
+	)
+	state.take_damage(1)
 	state.reset()
 	_check(
-		state.hp == GAME_STATE_SCRIPT.MAX_HP and not state.is_game_over(), "体力: reset で最大値に戻る"
+		state.hp == GAME_STATE_SCRIPT.MAX_HP and not state.is_invincible(),
+		"体力: reset で最大値に戻り無敵も解ける"
 	)
+	state.free()
+
+
+## 画面の遷移表: 各画面で受け付ける操作と移る先、ステージを作り直す遷移
+func _check_screen_transitions() -> void:
+	var screen: Dictionary = GAME_STATE_SCRIPT.Screen
+	var command: Dictionary = GAME_STATE_SCRIPT.Command
+	var cases: Array[Array] = [
+		[screen.TITLE, command.CONFIRM, screen.PLAYING, false],
+		[screen.TITLE, command.PAUSE, screen.TITLE, false],
+		[screen.TITLE, command.QUIT, screen.TITLE, false],
+		[screen.PLAYING, command.PAUSE, screen.PAUSED, false],
+		[screen.PLAYING, command.CONFIRM, screen.PLAYING, false],
+		[screen.PLAYING, command.QUIT, screen.PLAYING, false],
+		[screen.PAUSED, command.PAUSE, screen.PLAYING, false],
+		[screen.PAUSED, command.QUIT, screen.TITLE, true],
+		[screen.PAUSED, command.CONFIRM, screen.PAUSED, false],
+		[screen.GAME_OVER, command.CONFIRM, screen.PLAYING, true],
+		[screen.GAME_OVER, command.QUIT, screen.TITLE, true],
+		[screen.GAME_OVER, command.PAUSE, screen.GAME_OVER, false],
+		[screen.CLEAR, command.CONFIRM, screen.TITLE, true],
+		[screen.CLEAR, command.PAUSE, screen.CLEAR, false],
+		[screen.CLEAR, command.QUIT, screen.CLEAR, false],
+	]
+	var state: Node = GAME_STATE_SCRIPT.new()
+	for case: Array in cases:
+		state.screen = case[0]
+		var restart: bool = state.send(case[1])
+		_check(
+			state.screen == case[2] and restart == case[3],
+			"画面: %s で %s を操作すると %s に移り、作り直しは %s"
+			% [
+				screen.keys()[case[0]],
+				command.keys()[case[1]],
+				screen.keys()[case[2]],
+				case[3],
+			]
+		)
+	state.screen = screen.TITLE
+	state.clear_stage()
+	_check(state.screen == screen.TITLE, "画面: プレイ中でなければゴールに着いてもクリアにならない")
+	state.screen = screen.PLAYING
+	state.clear_stage()
+	_check(state.screen == screen.CLEAR, "画面: プレイ中にゴールに着くとステージクリアになる")
 	state.free()
 
 
@@ -197,7 +251,9 @@ func _check_sync_hit() -> void:
 
 
 func _check_input_map() -> void:
-	for action: String in ["move_left", "move_right", "jump", "attack"]:
+	for action: String in [
+		"move_left", "move_right", "jump", "attack", "confirm", "pause", "quit_to_title"
+	]:
 		_check(InputMap.has_action(action), "InputMap: %s アクションがある" % action)
 		var has_key: bool = false
 		for event: InputEvent in InputMap.action_get_events(action):
