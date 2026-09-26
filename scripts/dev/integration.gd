@@ -153,7 +153,9 @@ func _check_light_omen(main: Node2D) -> void:
 		var band: Rect2 = Rect2(light["x"] - width, main.SCREEN_HEIGHT, width, Stage.GROUND_Y)
 		var found: bool = false
 		for child: Node in main.get_node("Lights").get_children():
-			found = found or (child is ColorRect and Rect2(child.position, child.size) == band)
+			found = found or (
+				child is ColorRect and Rect2(child.position, child.size).is_equal_approx(band)
+			)
 		_check(found, "予兆: 光源 (x = %d) の反転区間で影が動く範囲に下の画面の帯がある" % int(light["x"]))
 
 
