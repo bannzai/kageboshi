@@ -21,8 +21,8 @@
 | lint | `make lint` (`gdlint scripts/`) | exit 0 |
 | アセットインポート (初回・素材追加後) | `make import` | exit 0 (ログは `tmp/import.log`) |
 | 起動検証 (メインシーン・スクリプトのロード) | `make check` | exit 0 かつ `tmp/check.log` に `kageboshi boot` が出力され、WARNING / ERROR 行がない |
-| ロジック検証 (移動・スクロール・攻撃・敵・体力・同期ボーナスの計算、画面の遷移表、入力割り当て、設定と進行の保存・読み込みと壊れた保存データの扱い、全シーンのロード) | `make selfcheck` | exit 0 かつ `tmp/selfcheck.log` に `selfcheck OK` が出力され、WARNING / ERROR 行がない |
-| 入力統合テスト (キー入力で主人公を動かし、地形との当たり判定・スクロール、影が同じ動き・同じ攻撃をすること、敵を倒す・被弾・ゲームオーバー・同期ボーナス、タイトル・ポーズ・リトライ・ステージクリア・設定の画面の遷移と、設定画面での音量・キー割り当ての変更と保存を確認) | `make integration` | exit 0 かつ `tmp/integration.log` に `integration OK` が出力され、WARNING / ERROR 行がない |
+| ロジック検証 (移動・スクロール・攻撃・敵・体力・同期ボーナスの計算、画面の遷移表、入力割り当て、設定と進行の保存・読み込みと壊れた保存データの扱い、全シーンのロード、BGM の繰り返しと BGM・効果音を鳴らす音量のバス、全素材が `assets/CREDITS.md` に記録されていること) | `make selfcheck` | exit 0 かつ `tmp/selfcheck.log` に `selfcheck OK` が出力され、WARNING / ERROR 行がない |
+| 入力統合テスト (キー入力で主人公を動かし、地形との当たり判定・スクロール、影が同じ動き・同じ攻撃をすること、敵を倒す・被弾・ゲームオーバー・同期ボーナス、タイトル・ポーズ・リトライ・ステージクリア・設定の画面の遷移と、設定画面での音量・キー割り当ての変更と保存、BGM がプレイ中だけ鳴ることと攻撃・ダメージ・同期ボーナス・影縫いの効果音を確認) | `make integration` | exit 0 かつ `tmp/integration.log` に `integration OK` が出力され、WARNING / ERROR 行がない |
 | headless 検証の一括実行 (lint → check → selfcheck → integration) | `make test` | exit 0 |
 | スクリーンショット (タイトル・プレイ開始・ジャンプ・段差・スクロール・ポーズ・敵・同期ボーナス・ゲームオーバー・ステージクリア・クリアを保存したタイトル・設定画面・壊れた保存データの知らせの見た目。headless の検証では見た目の崩れを検出できない) | `make screenshot` | exit 0 かつ `tmp/screenshot-*.png` が生成される |
 | 起動の録画 (操作なしの起動〜タイトルの表示。起動直後の描画崩れ・真っ黒を検出する) | `make movie` | exit 0 かつ `tmp/movie.mp4` が生成され、末尾のフレームの輝度平均が基準以上 (ffmpeg が必要) |
