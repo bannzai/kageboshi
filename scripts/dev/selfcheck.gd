@@ -1,6 +1,7 @@
 extends SceneTree
 ## 移動・スクロール・影の位置・攻撃・敵・体力・同期ボーナス・光源による影の反転と倍率・影縫い・引き寄せの計算、
-## 入力割り当て、設定と進行の保存・読み込み (壊れた保存データの扱いを含む)、シーンのロードの検証。
+## 昼・夕方・夜のステージの置き方とステージの進行、入力割り当て、設定と進行の保存・読み込み (壊れた保存データの
+## 扱いを含む)、シーンのロードの検証。
 ## 実行方法は AGENTS.md を参照。release ビルドで assert が消えるため、明示的な判定と exit code で結果を返す。
 
 ## 起動検証 (main_scene の --quit) ではロードされない遷移先も含めた全シーン
@@ -12,8 +13,10 @@ const SCENES: Array[String] = [
 const MAIN_SCRIPT := preload("res://scripts/main.gd")
 ## 移動・落下の計算を持つ主人公のスクリプト
 const HERO_SCRIPT := preload("res://scripts/hero.gd")
-## 地形と敵の出現位置の定義
+## ステージ 1 本の地形と敵の出現位置の定義
 const STAGE_SCRIPT := preload("res://scripts/stage.gd")
+## 遊ぶ順に並べたステージの一覧
+const STAGES_SCRIPT := preload("res://scripts/stages.gd")
 ## 往復と体力の計算を持つ敵のスクリプト
 const ENEMY_SCRIPT := preload("res://scripts/enemy.gd")
 ## 同期ボーナスの計算
@@ -24,7 +27,7 @@ const GAME_STATE_SCRIPT := preload("res://scripts/game_state.gd")
 const STITCH_SCRIPT := preload("res://scripts/shadow_stitch.gd")
 ## 光源による影の反転と倍率の計算
 const LIGHT_SCRIPT := preload("res://scripts/light.gd")
-## 反転と倍率の検証に使う光源 (倍率 1 の高さ)。Stage.LIGHTS を変えても期待値が変わらないように、検証用に置く
+## 反転と倍率の検証に使う光源 (倍率 1 の高さ)。ステージの光源を変えても期待値が変わらないように、検証用に置く
 const TEST_LIGHTS: Array[Dictionary] = [
 	{"x": 1000.0, "height": LIGHT_SCRIPT.STANDARD_HEIGHT, "zone": 200.0},
 	{"x": 2000.0, "height": LIGHT_SCRIPT.STANDARD_HEIGHT / 2.0, "zone": 100.0},
@@ -48,6 +51,9 @@ const GAME_ACTIONS: Array[String] = [
 ## 保存・読み込みの検証で書き出す保存データ。プレイヤーの保存データ (user://) を書き換えないよう tmp/ に置く
 const SAVE_TEST_PATH: String = "res://tmp/selfcheck-save.json"
 
+## スクロールと影縫いのずれの検証に使うステージの横幅
+const TEST_STAGE_WIDTH: float = 3200.0
+
 ## 検証が 1 件でも失敗したか。true なら exit code 1 で終わる
 var failed: bool = false
 
@@ -62,6 +68,7 @@ func _initialize() -> void:
 	_check_enemy_hp()
 	_check_game_state()
 	_check_screen_transitions()
+	_check_stage_progression()
 	_check_sync_hit()
 	_check_gauge()
 	_check_next_pin()
@@ -70,6 +77,7 @@ func _initialize() -> void:
 	_check_light_reversal()
 	_check_shadow_scale()
 	_check_stage_lights()
+	_check_stage_layouts()
 	_check_shadow_with_offset()
 	_check_input_map()
 	_check_save_parse()
@@ -81,6 +89,11 @@ func _initialize() -> void:
 	else:
 		print("selfcheck OK")
 		quit(0)
+
+
+## 保存の検証でクリアしたステージとして書くステージの ID (最初のステージの ID)
+func _first_stage_id() -> String:
+	return STAGES_SCRIPT.all()[0].id
 
 
 ## cond が false なら label を ERROR として出し、失敗として記録する
@@ -108,11 +121,12 @@ func _check_next_velocity() -> void:
 
 func _check_scroll_for() -> void:
 	var half: float = MAIN_SCRIPT.SCREEN_WIDTH / 2.0
-	var max_scroll: float = STAGE_SCRIPT.WIDTH - MAIN_SCRIPT.SCREEN_WIDTH
-	_check(MAIN_SCRIPT.scroll_for(100.0) == 0.0, "スクロール: ステージの左端では左へスクロールしない")
-	_check(MAIN_SCRIPT.scroll_for(half + 300.0) == 300.0, "スクロール: 主人公が画面の中央に来る")
+	var width: float = TEST_STAGE_WIDTH
+	var max_scroll: float = width - MAIN_SCRIPT.SCREEN_WIDTH
+	_check(MAIN_SCRIPT.scroll_for(100.0, width) == 0.0, "スクロール: ステージの左端では左へスクロールしない")
+	_check(MAIN_SCRIPT.scroll_for(half + 300.0, width) == 300.0, "スクロール: 主人公が画面の中央に来る")
 	_check(
-		MAIN_SCRIPT.scroll_for(STAGE_SCRIPT.WIDTH - 10.0) == max_scroll,
+		MAIN_SCRIPT.scroll_for(width - 10.0, width) == max_scroll,
 		"スクロール: ステージの右端より先は映さない"
 	)
 
@@ -120,7 +134,7 @@ func _check_scroll_for() -> void:
 func _check_shadow_position() -> void:
 	var expected: Vector2 = Vector2(300.0, 200.0 + MAIN_SCRIPT.SCREEN_HEIGHT)
 	_check(
-		MAIN_SCRIPT.shadow_position(Vector2(300.0, 200.0)) == expected,
+		MAIN_SCRIPT.shadow_position(Vector2(300.0, 200.0), TEST_LIGHTS) == expected,
 		"影: 同期中は主人公の上の画面 1 つ分下にいる"
 	)
 
@@ -141,29 +155,32 @@ func _check_attack_area() -> void:
 	_check(not left.intersects(enemy_on_ground), "攻撃: 背中側の敵には届かない")
 
 
+## 各ステージの敵の出現位置の並びと、画面の右端の位置に応じた出現の数
 func _check_spawns() -> void:
-	var spawns: Array[Dictionary] = STAGE_SCRIPT.SPAWNS
-	for i: int in range(1, spawns.size()):
-		_check(spawns[i - 1]["x"] <= spawns[i]["x"], "出現: SPAWNS が x の昇順 (%d 番目)" % i)
-	var first_x: float = spawns[0]["x"]
-	_check(
-		STAGE_SCRIPT.due_spawn_count(first_x - STAGE_SCRIPT.SPAWN_AHEAD - 1.0) == 0,
-		"出現: 画面の右端が出現位置の手前なら出現しない"
-	)
-	_check(
-		STAGE_SCRIPT.due_spawn_count(first_x - STAGE_SCRIPT.SPAWN_AHEAD) == 1,
-		"出現: 画面の右端が出現位置に近づいたら出現する"
-	)
-	_check(
-		STAGE_SCRIPT.due_spawn_count(STAGE_SCRIPT.WIDTH) == spawns.size(),
-		"出現: ステージの右端まで進めば全員出現する"
-	)
-	var has_top: bool = false
-	var has_bottom: bool = false
-	for spawn: Dictionary in spawns:
-		has_top = has_top or spawn["lane"] == COMBAT_SCRIPT.Lane.TOP
-		has_bottom = has_bottom or spawn["lane"] == COMBAT_SCRIPT.Lane.BOTTOM
-	_check(has_top and has_bottom, "出現: 上の画面と下の画面の両方に敵が出る")
+	for stage: STAGE_SCRIPT in STAGES_SCRIPT.all():
+		var label: String = "出現 (%s)" % stage.title
+		var spawns: Array[Dictionary] = stage.spawns
+		for i: int in range(1, spawns.size()):
+			_check(spawns[i - 1]["x"] <= spawns[i]["x"], "%s: spawns が x の昇順 (%d 番目)" % [label, i])
+		var first_x: float = spawns[0]["x"]
+		_check(
+			stage.due_spawn_count(first_x - STAGE_SCRIPT.SPAWN_AHEAD - 1.0) == 0,
+			"%s: 画面の右端が出現位置の手前なら出現しない" % label
+		)
+		_check(
+			stage.due_spawn_count(first_x - STAGE_SCRIPT.SPAWN_AHEAD) == 1,
+			"%s: 画面の右端が出現位置に近づいたら出現する" % label
+		)
+		_check(
+			stage.due_spawn_count(stage.width) == spawns.size(),
+			"%s: ステージの右端まで進めば全員出現する" % label
+		)
+		var has_top: bool = false
+		var has_bottom: bool = false
+		for spawn: Dictionary in spawns:
+			has_top = has_top or spawn["lane"] == COMBAT_SCRIPT.Lane.TOP
+			has_bottom = has_bottom or spawn["lane"] == COMBAT_SCRIPT.Lane.BOTTOM
+		_check(has_top and has_bottom, "%s: 上の画面と下の画面の両方に敵が出る" % label)
 
 
 func _check_patrol() -> void:
@@ -239,7 +256,7 @@ func _check_screen_transitions() -> void:
 		[screen.GAME_OVER, command.CONFIRM, screen.PLAYING, true],
 		[screen.GAME_OVER, command.QUIT, screen.TITLE, true],
 		[screen.GAME_OVER, command.PAUSE, screen.GAME_OVER, false],
-		[screen.CLEAR, command.CONFIRM, screen.TITLE, true],
+		[screen.CLEAR, command.CONFIRM, screen.PLAYING, true],
 		[screen.CLEAR, command.PAUSE, screen.CLEAR, false],
 		[screen.CLEAR, command.QUIT, screen.CLEAR, false],
 		[screen.TITLE, command.SETTINGS, screen.SETTINGS, false],
@@ -274,6 +291,51 @@ func _check_screen_transitions() -> void:
 	_check(state.clear_stage(), "画面: プレイ中にゴールに着くとステージクリアになる (true を返す)")
 	_check(state.screen == screen.CLEAR, "画面: プレイ中にゴールに着くとステージクリアになる")
 	_check(not state.clear_stage(), "画面: ステージクリアの後にゴールに触れ続けても、もう一度はクリアしない")
+	state.free()
+
+
+## ステージの進行: ステージクリアから次のステージへ進み、最後のステージのクリアとタイトルへ戻る遷移で最初の
+## ステージに戻る。ゲームオーバーからのやり直しとポーズからの再開は同じステージのまま
+func _check_stage_progression() -> void:
+	var screen: Dictionary = GAME_STATE_SCRIPT.Screen
+	var command: Dictionary = GAME_STATE_SCRIPT.Command
+	var last: int = STAGES_SCRIPT.count() - 1
+	# [移る前の画面, 移る前のステージの番号, 操作, 移った先の画面, 移った後のステージの番号, 作り直すか]
+	var cases: Array[Array] = [
+		[screen.TITLE, 0, command.CONFIRM, screen.PLAYING, 0, false],
+		[screen.CLEAR, 0, command.CONFIRM, screen.PLAYING, 1, true],
+		[screen.CLEAR, last - 1, command.CONFIRM, screen.PLAYING, last, true],
+		[screen.CLEAR, last, command.CONFIRM, screen.TITLE, 0, true],
+		[screen.GAME_OVER, 1, command.CONFIRM, screen.PLAYING, 1, true],
+		[screen.GAME_OVER, 1, command.QUIT, screen.TITLE, 0, true],
+		[screen.PAUSED, 1, command.PAUSE, screen.PLAYING, 1, false],
+		[screen.PAUSED, last, command.QUIT, screen.TITLE, 0, true],
+	]
+	var state: Node = GAME_STATE_SCRIPT.new()
+	for case: Array in cases:
+		state.screen = case[0]
+		state.stage_index = case[1]
+		var restart: bool = state.send(case[2])
+		_check(
+			state.screen == case[3] and state.stage_index == case[4] and restart == case[5],
+			"進行: ステージ %d の %s で %s を操作するとステージ %d の %s に移り、作り直しは %s"
+			% [
+				case[1],
+				screen.keys()[case[0]],
+				command.keys()[case[2]],
+				case[4],
+				screen.keys()[case[3]],
+				case[5],
+			]
+		)
+		_check(
+			state.current_stage().title == STAGES_SCRIPT.all()[state.stage_index].title,
+			"進行: 遊んでいるステージはステージの番号のもの"
+		)
+	state.stage_index = 0
+	_check(not state.is_last_stage(), "進行: 最初のステージは最後のステージでない")
+	state.stage_index = last
+	_check(state.is_last_stage(), "進行: 最後のステージは最後のステージ")
 	state.free()
 
 
@@ -356,25 +418,25 @@ func _check_stitch_offset() -> void:
 	var synced: Vector2 = Vector2(1000.0, 256.0 + MAIN_SCRIPT.SCREEN_HEIGHT)
 	var pinned: Vector2 = Vector2(900.0, 200.0 + MAIN_SCRIPT.SCREEN_HEIGHT)
 	_check(
-		STITCH_SCRIPT.pinned_offset(pinned, synced) == pinned - synced,
+		STITCH_SCRIPT.pinned_offset(pinned, synced, TEST_STAGE_WIDTH) == pinned - synced,
 		"ずれ: 縫い止めた影は縫い止めた位置に残る"
 	)
 	var far: Vector2 = synced + Vector2(-STITCH_SCRIPT.MAX_OFFSET - 100.0, 0.0)
 	_check(
-		STITCH_SCRIPT.pinned_offset(far, synced).x == -STITCH_SCRIPT.MAX_OFFSET,
+		STITCH_SCRIPT.pinned_offset(far, synced, TEST_STAGE_WIDTH).x == -STITCH_SCRIPT.MAX_OFFSET,
 		"ずれ: 影は主人公から離れられる距離より遠くへは残らない"
 	)
 	var at_left: Vector2 = Vector2(100.0, synced.y)
 	_check(
-		STITCH_SCRIPT.clamp_offset(Vector2(-300.0, 0.0), at_left).x == -at_left.x,
+		STITCH_SCRIPT.clamp_offset(Vector2(-300.0, 0.0), at_left, TEST_STAGE_WIDTH).x == -at_left.x,
 		"ずれ: 影はステージの左端より外に出ない"
 	)
-	var at_right: Vector2 = Vector2(STAGE_SCRIPT.WIDTH - HERO_SCRIPT.SIZE.x - 100.0, synced.y)
+	var at_right: Vector2 = Vector2(TEST_STAGE_WIDTH - HERO_SCRIPT.SIZE.x - 100.0, synced.y)
 	_check(
-		STITCH_SCRIPT.clamp_offset(Vector2(300.0, 0.0), at_right).x == 100.0,
+		STITCH_SCRIPT.clamp_offset(Vector2(300.0, 0.0), at_right, TEST_STAGE_WIDTH).x == 100.0,
 		"ずれ: 影はステージの右端より外に出ない"
 	)
-	var run: Vector2 = STITCH_SCRIPT.running_offset(Vector2.ZERO, 1.0, synced, 0.25)
+	var run: Vector2 = STITCH_SCRIPT.running_offset(Vector2.ZERO, 1.0, synced, 0.25, TEST_STAGE_WIDTH)
 	_check(
 		run == Vector2(HERO_SCRIPT.MOVE_SPEED * 0.25, 0.0),
 		"ずれ: 主人公を止めている間は影だけが左右入力で主人公の速さで動く"
@@ -460,99 +522,180 @@ func _check_shadow_scale() -> void:
 	_check(standard_moved == -30.0, "移動量: 倍率 1 の反転区間で主人公が右へ 30 進むと影は左へ 30 進む")
 
 
-## Stage.LIGHTS の置き方と、各光源の反転区間での影の体・攻撃の範囲 (倍率ごとの見た目の長さ・リーチ)
+## 各ステージの光源の置き方と、各光源の反転区間での影の体・攻撃の範囲 (倍率ごとの見た目の長さ・リーチ)。
+## 昼は影が縮む高い光源だけ、夕方は影が伸びる低い光源だけ、夜は影が縮む光源と伸びる光源が点在する
 func _check_stage_lights() -> void:
-	var lights: Array[Dictionary] = STAGE_SCRIPT.LIGHTS
-	var has_short: bool = false
-	var has_long: bool = false
-	for i: int in range(lights.size()):
-		var light: Dictionary = lights[i]
-		var scale: float = LIGHT_SCRIPT.shadow_scale(light["height"])
-		has_short = has_short or scale < 1.0
-		has_long = has_long or scale > 1.0
-		_check(
-			light["height"] > 0.0 and light["height"] <= STAGE_SCRIPT.GROUND_Y,
-			"光源 %d: 上の画面の地面と上端の間の高さ" % i
-		)
-		if i > 0:
+	var stages: Array[STAGE_SCRIPT] = STAGES_SCRIPT.all()
+	_check(stages.size() == 3, "ステージ: 昼・夕方・夜の 3 本がある")
+	if stages.size() != 3:
+		return
+	for stage: STAGE_SCRIPT in stages:
+		var lights: Array[Dictionary] = stage.lights
+		for i: int in range(lights.size()):
+			var light: Dictionary = lights[i]
+			var label: String = "光源 (%s の %d 番目)" % [stage.title, i]
 			_check(
-				lights[i - 1]["x"] + lights[i - 1]["zone"] <= light["x"],
-				"光源 %d: x の昇順で、反転区間が前の光源の反転区間と重ならない" % i
+				light["height"] > 0.0 and light["height"] <= STAGE_SCRIPT.GROUND_Y,
+				"%s: 上の画面の地面と上端の間の高さ" % label
 			)
-		_check_shadow_in_zone(light, i)
-	_check(has_short and has_long, "光源: 影が縮む高い光源と、影が伸びる低い光源の両方がある")
+			if i > 0:
+				var previous: Dictionary = lights[i - 1]
+				_check(
+					(
+						previous["x"] + previous["zone"]
+						<= MAIN_SCRIPT.shadow_reverse_range(light).position.x
+					),
+					"%s: x の昇順で、反転区間と予兆の帯が前の光源の反転区間と重ならない" % label
+				)
+			_check_shadow_in_zone(light, lights, label)
+	var day: Vector2i = _scale_counts(stages[0])
+	_check(
+		day.x > 0 and day.x == stages[0].lights.size(), "光源: 昼 (%s) は影が縮む高い光源だけ" % stages[0].title
+	)
+	var evening: Vector2i = _scale_counts(stages[1])
+	_check(
+		evening.y > 0 and evening.y == stages[1].lights.size(),
+		"光源: 夕方 (%s) は影が伸びる低い光源だけ" % stages[1].title
+	)
+	var night: Vector2i = _scale_counts(stages[2])
+	_check(
+		stages[2].lights.size() >= 3 and night.x > 0 and night.y > 0,
+		"光源: 夜 (%s) は影が縮む光源と伸びる光源が 3 本以上点在する" % stages[2].title
+	)
 
 
-## light (Stage.LIGHTS の i 番目) の手前・またいだ瞬間・反転区間の中で、影の体と攻撃の範囲を確かめる
-func _check_shadow_in_zone(light: Dictionary, i: int) -> void:
+## stage の光源のうち、影が縮む光源 (倍率 1 未満) の数を x、影が伸びる光源 (倍率 1 より大きい) の数を y にした値
+func _scale_counts(stage: STAGE_SCRIPT) -> Vector2i:
+	var counts: Vector2i = Vector2i.ZERO
+	for light: Dictionary in stage.lights:
+		var scale: float = LIGHT_SCRIPT.shadow_scale(light["height"])
+		if scale < 1.0:
+			counts.x += 1
+		elif scale > 1.0:
+			counts.y += 1
+	return counts
+
+
+## 光源が lights のステージの light の手前・またいだ瞬間・反転区間の中で、影の体と攻撃の範囲を確かめる。
+## label は失敗した時に出す光源の名前
+func _check_shadow_in_zone(light: Dictionary, lights: Array[Dictionary], label: String) -> void:
 	var hero_size: Vector2 = HERO_SCRIPT.SIZE
 	var feet_y: float = STAGE_SCRIPT.GROUND_Y
 	var offset: Vector2 = Vector2(0.0, MAIN_SCRIPT.SCREEN_HEIGHT)
 	var before: Vector2 = Vector2(light["x"] - 100.0 - hero_size.x / 2.0, feet_y - hero_size.y)
 	_check(
-		MAIN_SCRIPT.shadow_body_rect(before) == Rect2(before + offset, hero_size),
-		"光源 %d: 手前では影の体が主人公と同じ大きさで真下にある" % i
+		MAIN_SCRIPT.shadow_body_rect(before, lights) == Rect2(before + offset, hero_size),
+		"%s: 手前では影の体が主人公と同じ大きさで真下にある" % label
 	)
 	_check(
-		MAIN_SCRIPT.shadow_attack_area(before, 1.0)
+		MAIN_SCRIPT.shadow_attack_area(before, 1.0, lights)
 		== HERO_SCRIPT.attack_area(before + offset, 1.0, HERO_SCRIPT.ATTACK_REACH),
-		"光源 %d: 手前では影の攻撃が主人公と同じ向き・同じリーチ" % i
+		"%s: 手前では影の攻撃が主人公と同じ向き・同じリーチ" % label
 	)
 	var crossing: Vector2 = Vector2(light["x"] - hero_size.x / 2.0, feet_y - hero_size.y)
 	_check(
-		MAIN_SCRIPT.shadow_position(crossing) == crossing + offset,
-		"光源 %d: またいだ瞬間は影が主人公の真下にいる" % i
+		MAIN_SCRIPT.shadow_position(crossing, lights) == crossing + offset,
+		"%s: またいだ瞬間は影が主人公の真下にいる" % label
 	)
 	var scale: float = LIGHT_SCRIPT.shadow_scale(light["height"])
 	var inside: Vector2 = Vector2(
 		light["x"] + light["zone"] / 2.0 - hero_size.x / 2.0, feet_y - hero_size.y
 	)
-	var at: Vector2 = MAIN_SCRIPT.shadow_position(inside)
-	var body: Rect2 = MAIN_SCRIPT.shadow_body_rect(inside)
+	var at: Vector2 = MAIN_SCRIPT.shadow_position(inside, lights)
+	var body: Rect2 = MAIN_SCRIPT.shadow_body_rect(inside, lights)
 	_check(
 		is_equal_approx(body.size.y, hero_size.y * scale),
-		"光源 %d: 反転区間では影の見た目の長さが倍率の分だけ伸び縮みする" % i
+		"%s: 反転区間では影の見た目の長さが倍率の分だけ伸び縮みする" % label
 	)
 	_check(
 		is_equal_approx(body.end.y, feet_y + offset.y),
-		"光源 %d: 伸び縮みしても影の足元は下の画面の地面にある" % i
+		"%s: 伸び縮みしても影の足元は下の画面の地面にある" % label
 	)
-	var attack: Rect2 = MAIN_SCRIPT.shadow_attack_area(inside, 1.0)
+	var attack: Rect2 = MAIN_SCRIPT.shadow_attack_area(inside, 1.0, lights)
 	_check(
 		is_equal_approx(attack.size.x, HERO_SCRIPT.ATTACK_REACH * scale),
-		"光源 %d: 反転区間では影の攻撃のリーチが倍率の分だけ伸び縮みする" % i
+		"%s: 反転区間では影の攻撃のリーチが倍率の分だけ伸び縮みする" % label
 	)
 	_check(
 		is_equal_approx(attack.end.x, at.x),
-		"光源 %d: 右を向いた主人公の影の攻撃は、反転区間では影の左へ出る" % i
+		"%s: 右を向いた主人公の影の攻撃は、反転区間では影の左へ出る" % label
 	)
 
 
+## 各ステージの地形・敵・ゴールの置き方。地形はステージの中の地面より上に x の昇順で並び、反転区間で主人公と影が
+## 動く範囲は地面だけの平らな所で、敵の往復の範囲とゴールは地形と重ならない
+func _check_stage_layouts() -> void:
+	for stage: STAGE_SCRIPT in STAGES_SCRIPT.all():
+		var obstacles: Array[Rect2] = stage.obstacles
+		var goal: Rect2 = stage.goal()
+		for i: int in range(obstacles.size()):
+			var rect: Rect2 = obstacles[i]
+			var label: String = "地形 (%s の %d 番目)" % [stage.title, i]
+			_check(
+				(
+					rect.position.x >= 0.0
+					and rect.end.x <= stage.width
+					and rect.position.y >= 0.0
+					and rect.end.y <= STAGE_SCRIPT.GROUND_Y
+				),
+				"%s: ステージの中の地面より上にある" % label
+			)
+			if i > 0:
+				_check(obstacles[i - 1].position.x <= rect.position.x, "%s: x の昇順" % label)
+			_check(not rect.intersects(goal), "%s: ゴールと重ならない" % label)
+		for light: Dictionary in stage.lights:
+			var band: Rect2 = MAIN_SCRIPT.shadow_reverse_range(light)
+			var left: float = band.position.x - HERO_SCRIPT.SIZE.x / 2.0
+			var right: float = light["x"] + light["zone"] + HERO_SCRIPT.SIZE.x / 2.0
+			var moving: Rect2 = Rect2(left, 0.0, right - left, STAGE_SCRIPT.GROUND_Y)
+			for rect: Rect2 in obstacles:
+				_check(
+					not moving.intersects(rect),
+					(
+						"光源 (%s の x = %d): 反転区間で主人公と影が動く範囲が地面だけの平らな所"
+						% [stage.title, int(light["x"])]
+					)
+				)
+		for spawn: Dictionary in stage.spawns:
+			var patrol: Rect2 = Rect2(
+				spawn["x"] - spawn["patrol"],
+				spawn["floor_y"] - ENEMY_SCRIPT.SIZE.y,
+				spawn["patrol"] + ENEMY_SCRIPT.SIZE.x,
+				ENEMY_SCRIPT.SIZE.y
+			)
+			for rect: Rect2 in obstacles:
+				_check(
+					not patrol.intersects(rect),
+					"出現 (%s の x = %d): 敵の往復の範囲が地形と重ならない" % [stage.title, int(spawn["x"])]
+				)
+
+
 ## 影縫いのずれがある時の影の体・攻撃の範囲は、同期中の影の体・攻撃の範囲をずれの分だけ動かしたもので、
-## 大きさ・向きは主人公がいる光源の反転区間で決まる (Stage.LIGHTS の最初の光源の反転区間の中で確かめる)
+## 大きさ・向きは主人公がいる光源の反転区間で決まる (最初のステージの最初の光源の反転区間の中で確かめる)
 func _check_shadow_with_offset() -> void:
-	var light: Dictionary = STAGE_SCRIPT.LIGHTS[0]
+	var lights: Array[Dictionary] = STAGES_SCRIPT.all()[0].lights
+	var light: Dictionary = lights[0]
 	var inside: Vector2 = Vector2(
 		light["x"] + light["zone"] / 2.0 - HERO_SCRIPT.SIZE.x / 2.0,
 		STAGE_SCRIPT.GROUND_Y - HERO_SCRIPT.SIZE.y
 	)
 	var offset: Vector2 = Vector2(-120.0, 0.0)
-	var body: Rect2 = MAIN_SCRIPT.shadow_body_rect(inside)
+	var body: Rect2 = MAIN_SCRIPT.shadow_body_rect(inside, lights)
 	_check(
-		MAIN_SCRIPT.shadow_body_rect(inside, offset).is_equal_approx(
+		MAIN_SCRIPT.shadow_body_rect(inside, lights, offset).is_equal_approx(
 			Rect2(body.position + offset, body.size)
 		),
 		"影縫いと光源: ずれた影の体は、反転区間の同期中の影の体をずれの分だけ動かした位置と大きさ"
 	)
-	var attack: Rect2 = MAIN_SCRIPT.shadow_attack_area(inside, 1.0)
+	var attack: Rect2 = MAIN_SCRIPT.shadow_attack_area(inside, 1.0, lights)
 	_check(
-		MAIN_SCRIPT.shadow_attack_area(inside, 1.0, offset).is_equal_approx(
+		MAIN_SCRIPT.shadow_attack_area(inside, 1.0, lights, offset).is_equal_approx(
 			Rect2(attack.position + offset, attack.size)
 		),
 		"影縫いと光源: ずれた影の攻撃は、反転区間の同期中の影の攻撃をずれの分だけ動かした向き・リーチ"
 	)
 	_check(
-		MAIN_SCRIPT.shadow_body_rect(inside, Vector2.ZERO) == body,
+		MAIN_SCRIPT.shadow_body_rect(inside, lights, Vector2.ZERO) == body,
 		"影縫いと光源: ずれが 0 なら影の体は同期中と同じ"
 	)
 
@@ -593,7 +736,7 @@ func _check_save_parse() -> void:
 	_check(not empty["broken"], "保存データ: 版だけのデータは壊れていない")
 	_check(empty["volumes"] == defaults["volumes"], "保存データ: 書かれていない音量は既定値")
 
-	var stages: Array[String] = [STAGE_SCRIPT.ID]
+	var stages: Array[String] = [_first_stage_id()]
 	var keys: Dictionary = {"jump": [KEY_H]}
 	var text: String = SAVE_DATA_SCRIPT.serialize({"BGM": 0.3, "SE": 0.0}, stages, keys)
 	var loaded: Dictionary = SAVE_DATA_SCRIPT.parse(text)
@@ -612,7 +755,7 @@ func _check_save_parse() -> void:
 			{
 				"version": 1,
 				"volumes": {"BGM": 5.0, "SE": "loud"},
-				"cleared_stages": [1, STAGE_SCRIPT.ID, STAGE_SCRIPT.ID, null],
+				"cleared_stages": [1, _first_stage_id(), _first_stage_id(), null],
 				"keys":
 				{
 					"jump": [-3],
@@ -628,7 +771,7 @@ func _check_save_parse() -> void:
 	_check(partial["volumes"]["BGM"] == 1.0, "保存データ: 範囲を超えた音量は 1.0 に収める")
 	_check(partial["volumes"]["SE"] == SAVE_DATA_SCRIPT.DEFAULT_VOLUME, "保存データ: 数でない音量は既定値")
 	_check(
-		partial["cleared_stages"] == [STAGE_SCRIPT.ID],
+		partial["cleared_stages"] == [_first_stage_id()],
 		"保存データ: 文字列でない・重複したクリア済みステージは捨てる"
 	)
 	_check(partial["keys"].keys() == ["attack"], "保存データ: キーコードでない値を含むキー割り当ては捨てる")
@@ -694,9 +837,9 @@ func _check_save_file() -> void:
 	)
 	saver.set_volume("SE", 0.0)
 	_check(AudioServer.is_bus_mute(AudioServer.get_bus_index("SE")), "音量: 音量 0 はミュートにする")
-	saver.mark_cleared(STAGE_SCRIPT.ID)
-	saver.mark_cleared(STAGE_SCRIPT.ID)
-	_check(saver.cleared_stages == [STAGE_SCRIPT.ID], "保存: 同じステージを 2 度クリアしても 1 つ")
+	saver.mark_cleared(_first_stage_id())
+	saver.mark_cleared(_first_stage_id())
+	_check(saver.cleared_stages == [_first_stage_id()], "保存: 同じステージを 2 度クリアしても 1 つ")
 	saver.rebind("jump", KEY_H)
 	_check(SAVE_DATA_SCRIPT.action_keys("jump") == [KEY_H], "キー設定: 変えたキーを InputMap に反映する")
 	_check(saver.key_overrides().keys() == ["jump"], "キー設定: 既定と違うアクションだけを保存する")
@@ -711,7 +854,7 @@ func _check_save_file() -> void:
 	_check(not loader.loaded_broken, "読み込み: 書き出した保存データは壊れていない")
 	_check(is_equal_approx(loader.volumes["BGM"], 0.3), "読み込み: BGM の音量を読み戻す")
 	_check(loader.volumes["SE"] == 0.0, "読み込み: 効果音の音量を読み戻す")
-	_check(loader.cleared_stages == [STAGE_SCRIPT.ID], "読み込み: クリアしたステージを読み戻す")
+	_check(loader.cleared_stages == [_first_stage_id()], "読み込み: クリアしたステージを読み戻す")
 	_check(SAVE_DATA_SCRIPT.action_keys("jump") == [KEY_H], "読み込み: キー割り当てを InputMap に反映する")
 	_check(
 		is_equal_approx(AudioServer.get_bus_volume_db(bgm), linear_to_db(0.3)),

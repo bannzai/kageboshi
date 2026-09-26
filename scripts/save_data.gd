@@ -27,7 +27,7 @@ const FIXED_ACTION_PREFIX: String = "ui_"
 var path: String = SAVE_PATH
 ## バス名 (VOLUME_BUSES) → 音量 (0.0〜1.0)
 var volumes: Dictionary = {}
-## クリアしたステージの ID (scripts/stage.gd の ID)
+## クリアしたステージの ID (scripts/stage.gd の id)
 var cleared_stages: Array[String] = []
 ## 直近の読み込みで保存データが壊れていて既定値で始めたか。タイトルで知らせ、次に保存したら消す
 var loaded_broken: bool = false
