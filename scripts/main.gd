@@ -114,7 +114,7 @@ func _physics_process(delta: float) -> void:
 	if pin == ShadowStitch.Pin.HERO:
 		if direction != 0.0:
 			hero.facing = signf(direction)
-		hero.physics_step(0.0, false, delta)
+		hero.hold_step(delta)
 	else:
 		hero.physics_step(direction, playing and Input.is_action_just_pressed("jump"), delta)
 	_move_shadow_offset(direction, delta)
@@ -207,6 +207,7 @@ func _move_shadow_offset(direction: float, delta: float) -> void:
 		ShadowStitch.Pin.HERO:
 			shadow_offset = ShadowStitch.running_offset(shadow_offset, direction, synced, delta)
 		_:
+			shadow_offset = ShadowStitch.clamp_offset(shadow_offset, synced)
 			if pulling:
 				shadow_offset = ShadowStitch.pulled_offset(shadow_offset, delta)
 				pulling = shadow_offset != Vector2.ZERO

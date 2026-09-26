@@ -189,6 +189,21 @@ func _check_stitch_and_pull(main: Node2D, game_state: Node) -> void:
 	await _wait_physics_frames(10)
 	_check(game_state.gauge > gauge_synced, "引き寄せ: 同期に戻るとゲージが回復する")
 
+	await _hold_keys([KEY_SPACE], 3)
+	_press_keys([KEY_L], true)
+	await physics_frame
+	var held_y: float = hero.position.y
+	_check(not hero.is_on_floor(), "逆の影縫い: ジャンプ中に L キーを押す")
+	await _wait_physics_frames(20)
+	_check(
+		absf(hero.position.y - held_y) < POSITION_TOLERANCE,
+		"逆の影縫い: 空中で止めた主人公は落ちない (y = %.2f → %.2f)" % [held_y, hero.position.y]
+	)
+	_press_keys([KEY_L], false)
+	await _wait_physics_frames(60)
+	_check(hero.is_on_floor(), "逆の影縫い: L キーを離すと主人公が落ちて着地する")
+	_check_synced(main, "空中で止めて離した後")
+
 	var stopped_x: float = hero.position.x
 	_press_keys([KEY_L, KEY_RIGHT, KEY_SPACE], true)
 	await _wait_physics_frames(30)
@@ -222,6 +237,12 @@ func _check_stitch_and_pull(main: Node2D, game_state: Node) -> void:
 	)
 	_check(empty_offset_x < -50.0, "ゲージ切れ: 解除されてもずれは残る")
 	_press_keys([KEY_K], false)
+	await _hold_keys([KEY_LEFT], 120)
+	_check(hero.position.x < POSITION_TOLERANCE, "ステージの端: 主人公がステージの左端まで戻る")
+	_check(
+		shadow.position.x > -POSITION_TOLERANCE,
+		"ステージの端: 左にずれた影はステージの左端より外に出ない (x = %.2f)" % shadow.position.x
+	)
 	await _hold_keys([KEY_I], 1)
 	await _wait_physics_frames(40)
 	_check_synced(main, "ゲージ切れの後の引き寄せ後")

@@ -38,9 +38,14 @@ func physics_step(direction: float, jump: bool, delta: float) -> void:
 		facing = signf(direction)
 	velocity = next_velocity(velocity, direction, jump, is_on_floor(), delta)
 	move_and_slide()
-	attack_left = maxf(attack_left - delta, 0.0)
-	attack_cooldown_left = maxf(attack_cooldown_left - delta, 0.0)
-	_update_attack_visual()
+	_tick_attack(delta)
+
+
+## その場に止めたまま 1 物理フレーム進める (影縫いで主人公を縫い止めている間)。空中でも落ちず、
+## 攻撃の時間だけが進む。縫い止めを解いた時に止める前の勢いで飛び出さないよう、速度は捨てる
+func hold_step(delta: float) -> void:
+	velocity = Vector2.ZERO
+	_tick_attack(delta)
 
 
 ## 攻撃を始める。前の攻撃から ATTACK_INTERVAL 経っていなければ始めない。始めたら true
@@ -61,6 +66,12 @@ func is_attacking() -> bool:
 ## 体の矩形 (ステージ上の座標)
 func body_rect() -> Rect2:
 	return Rect2(position, SIZE)
+
+
+func _tick_attack(delta: float) -> void:
+	attack_left = maxf(attack_left - delta, 0.0)
+	attack_cooldown_left = maxf(attack_cooldown_left - delta, 0.0)
+	_update_attack_visual()
 
 
 func _update_attack_visual() -> void:
