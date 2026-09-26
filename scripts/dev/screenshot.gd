@@ -42,7 +42,8 @@ func _run() -> void:
 ## 右へスクロールして壁の手前 → ポーズ → 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス →
 ## 敵に触れ続けたゲームオーバー → リトライしてゴールに入ったステージクリア → クリアを保存したタイトル →
 ## 設定画面 → キーを待つ設定画面 → 壊れた保存データを既定値に戻したタイトル →
-## 光源の手前で見える反転区間の予兆 → 高い光源の反転区間で逆へ動いて縮んだ影の攻撃 → 低い光源の反転区間で伸びた影の攻撃)。
+## 光源の手前で見える反転区間の予兆 → 高い光源の反転区間で逆へ動いて縮んだ影の攻撃 → 低い光源の反転区間で伸びた影の攻撃 →
+## 影を縫い止めて主人公だけが進んだ影縫い → 引き寄せの途中 → 主人公を止めて影だけが進んだ逆の影縫い)。
 ## 失敗した撮影は _capture() が quit(1) 済みなので、false を受けたらそのまま抜ける。
 func _capture_scenes() -> bool:
 	if not await _capture_title():
@@ -193,8 +194,37 @@ func _capture_lights() -> bool:
 	await _place_hero(main, low["x"] + low["zone"] / 2.0)
 	if not await _capture_attack(main, "tmp/screenshot-light-long.png"):
 		return false
+	if not await _capture_stitch(main):
+		return false
 	main.queue_free()
 	await process_frame
+	return true
+
+
+## 主人公を光源の反転区間の外 (ステージの左の平らな所) に置き、影縫い・引き寄せの途中・逆の影縫いを撮る
+func _capture_stitch(main: Node2D) -> bool:
+	await _place_hero(main, 220.0)
+	await _wait_physics_frames(20)
+	Input.parse_input_event(_key_event(KEY_K, true))
+	Input.parse_input_event(_key_event(KEY_RIGHT, true))
+	await _wait_physics_frames(40)
+	if not await _capture("tmp/screenshot-stitch.png"):
+		return false
+	Input.parse_input_event(_key_event(KEY_RIGHT, false))
+	Input.parse_input_event(_key_event(KEY_K, false))
+	await _hold_keys([KEY_I], 1)
+	await _wait_physics_frames(5)
+	if not await _capture("tmp/screenshot-pull.png"):
+		return false
+	await _wait_physics_frames(40)
+	Input.parse_input_event(_key_event(KEY_L, true))
+	Input.parse_input_event(_key_event(KEY_RIGHT, true))
+	await _wait_physics_frames(40)
+	if not await _capture("tmp/screenshot-stitch-hero.png"):
+		return false
+	Input.parse_input_event(_key_event(KEY_RIGHT, false))
+	Input.parse_input_event(_key_event(KEY_L, false))
+	await _wait_physics_frames(1)
 	return true
 
 
