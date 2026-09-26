@@ -99,17 +99,29 @@ func _capture_lights() -> bool:
 	if not await _capture("tmp/screenshot-light-omen.png"):
 		return false
 	await _hold_keys([KEY_RIGHT], 47)
-	await _hold_keys([KEY_J], 1)
-	if not await _capture("tmp/screenshot-light-reverse.png"):
+	if not await _capture_attack(main, "tmp/screenshot-light-reverse.png"):
 		return false
 	var low: Dictionary = Stage.LIGHTS[1]
 	await _place_hero(main, low["x"] + low["zone"] / 2.0)
-	await _hold_keys([KEY_J], 1)
-	if not await _capture("tmp/screenshot-light-long.png"):
+	if not await _capture_attack(main, "tmp/screenshot-light-long.png"):
 		return false
 	main.queue_free()
 	await process_frame
 	return true
+
+
+## 前の攻撃から次の攻撃を始められるまで待って攻撃キーを押し、影の攻撃が表示されている間に path へ撮影する。
+## 攻撃が始まらなければ quit(1) する
+func _capture_attack(main: Node2D, path: String) -> bool:
+	var hero: Hero = main.get_node("Hero")
+	while hero.attack_cooldown_left > 0.0:
+		await physics_frame
+	await _hold_keys([KEY_J], 1)
+	if not main.get_node("Shadow/Attack").visible:
+		push_error("影の攻撃が表示されていない: %s" % path)
+		quit(1)
+		return false
+	return await _capture(path)
 
 
 ## 主人公の体の中心を center_x に置いて地面に立たせ、出現済みの敵を消す (敵に触れて半透明になった姿を撮らない)
