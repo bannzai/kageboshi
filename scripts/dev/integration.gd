@@ -146,14 +146,15 @@ func _check_damage_and_game_over(main: Node2D, game_state: Node) -> void:
 	_check(absf(hero.position.x - over_x) < POSITION_TOLERANCE, "ゲームオーバー: 操作を受け付けない")
 
 
-## 各光源の反転区間の予兆として、下の画面の反転区間と同じ位置・大きさの帯が置かれている
+## 各光源の反転区間の予兆として、下の画面の光源の x から左へ、反転区間の幅に倍率を掛けた幅の帯が置かれている
 func _check_light_omen(main: Node2D) -> void:
 	for light: Dictionary in Stage.LIGHTS:
-		var zone: Rect2 = Rect2(light["x"], main.SCREEN_HEIGHT, light["zone"], Stage.GROUND_Y)
+		var width: float = light["zone"] * Light.shadow_scale(light["height"])
+		var band: Rect2 = Rect2(light["x"] - width, main.SCREEN_HEIGHT, width, Stage.GROUND_Y)
 		var found: bool = false
 		for child: Node in main.get_node("Lights").get_children():
-			found = found or (child is ColorRect and Rect2(child.position, child.size) == zone)
-		_check(found, "予兆: 光源 (x = %d) の反転区間に下の画面の帯がある" % int(light["x"]))
+			found = found or (child is ColorRect and Rect2(child.position, child.size) == band)
+		_check(found, "予兆: 光源 (x = %d) の反転区間で影が動く範囲に下の画面の帯がある" % int(light["x"]))
 
 
 ## light (Stage.LIGHTS の要素) の手前から右キーで進むと、光源をまたいだ反転区間で影だけが左へ、光源の倍率の分だけ
@@ -183,6 +184,12 @@ func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 	_check(
 		is_equal_approx(main.get_node("Shadow/Body").size.y, Hero.SIZE.y * scale),
 		"%s: 影の見た目の長さが光源の倍率の分だけ伸び縮みする" % label
+	)
+	var band: Rect2 = main.shadow_reverse_range(light)
+	var shadow_center: float = shadow.position.x + Hero.SIZE.x / 2.0
+	_check(
+		band.position.x <= shadow_center and shadow_center <= band.end.x,
+		"%s: 反転区間の影は予兆の帯の範囲にいる" % label
 	)
 
 	var behind: Node2D = main.spawn_enemy(

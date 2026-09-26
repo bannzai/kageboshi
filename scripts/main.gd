@@ -39,13 +39,13 @@ const SYNC_COLOR: Color = Color(1.0, 0.82, 0.25, 1.0)
 const SYNC_EFFECT_TIME: float = 0.6
 ## 光源の柱の色
 const LAMP_POST_COLOR: Color = Color(0.25, 0.22, 0.2, 1.0)
-## 光源の灯りと、反転区間を照らす光・下の画面の反転区間の矢印の色
+## 光源の灯りと、反転区間を照らす光・下の画面の帯の矢印の色
 const LAMP_LIGHT_COLOR: Color = Color(1.0, 0.86, 0.45, 1.0)
 ## 上の画面で反転区間を照らす光の不透明度 (地形・敵が透けて見える薄さにする)
 const LAMP_BEAM_ALPHA: float = 0.3
-## 下の画面の反転区間の帯の色 (下の画面の背景より明るくし、影が逆へ動く区間だと分かるようにする)
+## 下の画面で、反転区間の影が逆へ動く範囲の帯の色 (下の画面の背景より明るくし、影が逆へ動く所だと分かるようにする)
 const REVERSE_ZONE_COLOR: Color = Color(0.5, 0.45, 0.3, 0.35)
-## 下の画面の反転区間に並べる左向きの矢印の間隔 (px)。矢印どうしの間を矢印 1 つ分以上空け、並んだ矢印だと読めるようにする
+## 下の画面の帯に並べる左向きの矢印の間隔 (px)。矢印どうしの間を矢印 1 つ分以上空け、並んだ矢印だと読めるようにする
 const REVERSE_ARROW_SPACING: float = 48.0
 
 ## カメラの横スクロール量 (画面の左端のステージ上の x)
@@ -168,8 +168,9 @@ func _terrain_rect(area: Rect2, color: Color) -> ColorRect:
 	return rect
 
 
-## Stage.LIGHTS の光源ごとに、上の画面には光源 (柱と灯り) と反転区間を照らす光を、下の画面には反転区間の帯と
-## 左向きの矢印を置く (反転区間の予兆)。主人公は画面の中央にいるため、反転区間は入る半画面前から見える
+## Stage.LIGHTS の光源ごとに、上の画面には光源 (柱と灯り) と反転区間を照らす光を、下の画面には反転区間で影が
+## 逆へ動く範囲 (光源から左へ、反転区間の幅に倍率を掛けた幅) の帯と左向きの矢印を置く (反転区間の予兆)。
+## 帯の幅で影の伸び縮みも前もって分かる。主人公は画面の中央にいるため、反転区間は入る半画面前から見える
 func _build_lights() -> void:
 	for light: Dictionary in Stage.LIGHTS:
 		var x: float = light["x"]
@@ -182,11 +183,11 @@ func _build_lights() -> void:
 		lights.add_child(beam)
 		lights.add_child(_terrain_rect(Rect2(x - 3.0, lamp_y, 6.0, light["height"]), LAMP_POST_COLOR))
 		lights.add_child(_terrain_rect(Rect2(x - 10.0, lamp_y - 12.0, 20.0, 14.0), LAMP_LIGHT_COLOR))
-		var zone: Rect2 = Rect2(x, SCREEN_HEIGHT, light["zone"], Stage.GROUND_Y)
-		lights.add_child(_terrain_rect(zone, REVERSE_ZONE_COLOR))
-		var arrow_y: float = zone.get_center().y
-		var arrow_x: float = x + REVERSE_ARROW_SPACING / 2.0
-		while arrow_x < zone.end.x:
+		var band: Rect2 = shadow_reverse_range(light)
+		lights.add_child(_terrain_rect(band, REVERSE_ZONE_COLOR))
+		var arrow_y: float = band.get_center().y
+		var arrow_x: float = band.position.x + REVERSE_ARROW_SPACING / 2.0
+		while arrow_x < band.end.x:
 			var arrow: Polygon2D = Polygon2D.new()
 			arrow.polygon = PackedVector2Array(
 				[
@@ -351,6 +352,13 @@ static func shadow_attack_area(hero_position: Vector2, hero_facing: float) -> Re
 		hero_facing * Light.shadow_direction(center_x, Stage.LIGHTS),
 		Hero.ATTACK_REACH * Light.shadow_scale_at(center_x, Stage.LIGHTS)
 	)
+
+
+## light (Stage.LIGHTS の要素) の反転区間で、影の体の中心が逆へ動く範囲の下の画面の矩形 (地面より上)。
+## 光源の x から左へ、反転区間の幅に光源の倍率を掛けた幅
+static func shadow_reverse_range(light: Dictionary) -> Rect2:
+	var width: float = light["zone"] * Light.shadow_scale(light["height"])
+	return Rect2(light["x"] - width, SCREEN_HEIGHT, width, Stage.GROUND_Y)
 
 
 ## 主人公の中心が hero_center_x の時の横スクロール量。主人公を画面の中央に置き、ステージの外は映さない
