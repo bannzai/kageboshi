@@ -8,9 +8,13 @@ extends Node2D
 ## GameState の画面に合わせて重ねて表示する。ステージを最初からやり直す時と次のステージへ進む時は、このシーンを
 ## 読み込み直す。遊んでいるステージ (昼・夕方・夜) は GameState が持つ。
 ## ゴールに着いたらステージをクリア済みとして SaveData に保存する。
+## ステージの BGM はプレイ中の間だけ鳴らし、攻撃・ダメージ・同期ボーナス・影縫いで効果音を鳴らす。BGM と効果音は
+## 設定で音量を変えられるバス (SaveData の VOLUME_BUSES) で鳴らす。
 
 ## ステージ 1 本の地形・敵の出現位置・光源の定義
 const Stage := preload("res://scripts/stage.gd")
+## ステージごとの BGM
+const StageBgm := preload("res://scripts/stage_bgm.gd")
 ## 光源による影の反転と倍率の計算
 const Light := preload("res://scripts/light.gd")
 ## 主人公のスクリプト (体の大きさ・攻撃の範囲と 1 物理フレームの進め方)
@@ -155,11 +159,22 @@ var pulling: bool = false
 @onready var progress_label: Label = $Screens/Title/Progress
 ## タイトルに出す、壊れた保存データを既定値に戻した知らせ
 @onready var broken_save_label: Label = $Screens/Title/BrokenSave
+## ステージの BGM (BGM バス)
+@onready var bgm_player: AudioStreamPlayer = $Audio/Bgm
+## 攻撃の効果音 (SE バス)
+@onready var attack_sound: AudioStreamPlayer = $Audio/Attack
+## ダメージの効果音 (SE バス)
+@onready var damage_sound: AudioStreamPlayer = $Audio/Damage
+## 同期ボーナスの効果音 (SE バス)
+@onready var sync_sound: AudioStreamPlayer = $Audio/Sync
+## 影縫いの効果音 (SE バス)
+@onready var stitch_sound: AudioStreamPlayer = $Audio/Stitch
 
 
 func _ready() -> void:
 	print("kageboshi boot")
 	game_state.reset()
+	bgm_player.stream = StageBgm.bgm_of(stage.id)
 	sync_flash.color = SYNC_COLOR
 	sky.color = stage.sky
 	stage_label.text = "STAGE %d  %s" % [game_state.stage_index + 1, stage.title]
@@ -182,6 +197,7 @@ func _physics_process(delta: float) -> void:
 	if game_state.is_playing():
 		_step_stage(delta)
 	_update_hud()
+	_update_bgm()
 
 
 ## 画面を切り替える入力を GameState に送る。ステージを最初から作り直す遷移なら、このシーンを読み込み直して
@@ -200,6 +216,7 @@ func _step_stage(delta: float) -> void:
 	game_state.tick(delta)
 	if Input.is_action_just_pressed("attack") and hero.start_attack():
 		swing_hits.clear()
+		attack_sound.play()
 	var direction: float = Input.get_axis("move_left", "move_right")
 	_update_pin(delta)
 	if pin == ShadowStitch.Pin.HERO:
@@ -318,6 +335,8 @@ func _update_pin(delta: float) -> void:
 			shadow_offset = ShadowStitch.released_offset(shadow_offset)
 		if next == ShadowStitch.Pin.SHADOW:
 			pinned_position = shadow.position
+		if next != ShadowStitch.Pin.NONE:
+			stitch_sound.play()
 		pin = next
 	if pin != ShadowStitch.Pin.NONE:
 		game_state.spend_gauge(delta)
@@ -432,12 +451,13 @@ func _resolve_contact_damage() -> void:
 		hero.body_rect(), shadow_body_rect(hero.position, stage.lights, shadow_offset)
 	]
 	for enemy: Enemy in _living_enemies():
-		if bodies[enemy.lane].intersects(enemy.body_rect()):
-			game_state.take_damage(CONTACT_DAMAGE)
+		if bodies[enemy.lane].intersects(enemy.body_rect()) and game_state.take_damage(CONTACT_DAMAGE):
+			damage_sound.play()
 
 
-## 同期ボーナスが出たことを、仕切り線の光と主人公・影の間の文字で知らせる
+## 同期ボーナスが出たことを、仕切り線の光と主人公・影の間の文字と効果音で知らせる
 func _show_sync_effect() -> void:
+	sync_sound.play()
 	var label: Label = Label.new()
 	label.text = "SYNC x%d" % Combat.SYNC_MULTIPLIER
 	label.add_theme_color_override("font_color", SYNC_COLOR)
@@ -485,6 +505,14 @@ func _update_hud() -> void:
 	var alpha: float = INVINCIBLE_ALPHA if game_state.is_invincible() else 1.0
 	hero.modulate.a = alpha
 	shadow.modulate.a = alpha
+
+
+## BGM をプレイ中の間だけ鳴らす。ポーズ・ゲームオーバー・ステージクリアの間は止め、プレイ中に戻ったら続きから鳴らす。
+## タイトル・設定の画面ではまだ鳴らさない (プレイを始めた時に最初から鳴らす)
+func _update_bgm() -> void:
+	bgm_player.stream_paused = not game_state.is_playing()
+	if game_state.is_playing() and not bgm_player.has_stream_playback():
+		bgm_player.play()
 
 
 ## hints ([アクション, 操作の説明] の並び) の操作の案内。キーは各アクションの今の 1 つ目のキー (「Enter: Start」)

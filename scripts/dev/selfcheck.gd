@@ -1,7 +1,8 @@
 extends SceneTree
 ## 移動・スクロール・影の位置・攻撃・敵・体力・同期ボーナス・光源による影の反転と倍率・影縫い・引き寄せの計算、
 ## 昼・夕方・夜のステージの置き方とステージの進行、入力割り当て、設定と進行の保存・読み込み (壊れた保存データの
-## 扱いを含む)、シーンのロードの検証。
+## 扱いを含む)、シーンのロード、ステージごとの BGM の繰り返しと BGM・効果音を鳴らすバス、全素材が
+## assets/CREDITS.md に記録されていることの検証。
 ## 実行方法は AGENTS.md を参照。release ビルドで assert が消えるため、明示的な判定と exit code で結果を返す。
 
 ## 起動検証 (main_scene の --quit) ではロードされない遷移先も含めた全シーン
@@ -50,6 +51,14 @@ const GAME_ACTIONS: Array[String] = [
 ]
 ## 保存・読み込みの検証で書き出す保存データ。プレイヤーの保存データ (user://) を書き換えないよう tmp/ に置く
 const SAVE_TEST_PATH: String = "res://tmp/selfcheck-save.json"
+## ステージごとの BGM
+const STAGE_BGM_SCRIPT := preload("res://scripts/stage_bgm.gd")
+## メインシーンの効果音のノード (Audio の下) の名前
+const SOUND_EFFECTS: Array[String] = ["Attack", "Damage", "Sync", "Stitch"]
+## 素材の置き場所
+const ASSETS_DIR: String = "res://assets"
+## 素材の記録。ASSETS_DIR の下の全素材を、ASSETS_DIR からの相対パスをバッククォートで囲んで書く
+const CREDITS_PATH: String = "res://assets/CREDITS.md"
 
 ## スクロールと影縫いのずれの検証に使うステージの横幅
 const TEST_STAGE_WIDTH: float = 3200.0
@@ -84,6 +93,8 @@ func _initialize() -> void:
 	_check_rebound()
 	_check_save_file()
 	_check_scenes()
+	_check_audio()
+	_check_credits()
 	if failed:
 		quit(1)
 	else:
@@ -887,6 +898,68 @@ func _check_save_file() -> void:
 func _remove_file(path: String) -> void:
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(path)
+
+
+## 昼・夕方・夜の各ステージに別々の BGM があって繰り返し鳴り、メインシーンの BGM と効果音は設定で音量を変えられる
+## バスで鳴らす。メインシーンは tree には入れず (_ready を走らせず) ノードの設定だけを確認して free する
+func _check_audio() -> void:
+	for bgm: Resource in [
+		STAGE_BGM_SCRIPT.BGM_DAY, STAGE_BGM_SCRIPT.BGM_EVENING, STAGE_BGM_SCRIPT.BGM_NIGHT
+	]:
+		_check(bgm is AudioStreamOggVorbis, "BGM: %s を Ogg Vorbis として読み込める" % bgm.resource_path)
+	var stage_bgms: Array[AudioStream] = []
+	for stage: STAGE_SCRIPT in STAGES_SCRIPT.all():
+		_check(STAGE_BGM_SCRIPT.STAGE_BGM.has(stage.id), "BGM: ステージ %s の BGM がある" % stage.title)
+		if not STAGE_BGM_SCRIPT.STAGE_BGM.has(stage.id):
+			continue
+		var bgm: AudioStreamOggVorbis = STAGE_BGM_SCRIPT.bgm_of(stage.id)
+		_check(bgm.loop, "BGM: ステージ %s の BGM は繰り返す" % stage.title)
+		_check(not stage_bgms.has(bgm), "BGM: ステージ %s の BGM は他のステージと別の曲" % stage.title)
+		stage_bgms.append(bgm)
+	var main: Node = load("res://scenes/main.tscn").instantiate()
+	var bgm_player: AudioStreamPlayer = main.get_node("Audio/Bgm")
+	_check(bgm_player.bus == &"BGM", "音量: BGM は設定で音量を変えられる BGM バスで鳴らす")
+	for effect: String in SOUND_EFFECTS:
+		var player: AudioStreamPlayer = main.get_node("Audio/" + effect)
+		_check(player.stream != null, "効果音: %s の音がある" % effect)
+		_check(player.bus == &"SE", "音量: 効果音 %s は設定で音量を変えられる SE バスで鳴らす" % effect)
+	main.free()
+
+
+## ASSETS_DIR の下の全素材が CREDITS_PATH に記録されている。記録の照合が記録の無い素材を見逃さないことも確かめる
+func _check_credits() -> void:
+	_check(
+		unrecorded_assets(["audio/missing.wav"], "`audio/other.wav`") == ["audio/missing.wav"],
+		"素材の記録: 記録の無い素材を見つける"
+	)
+	var credits: String = FileAccess.get_file_as_string(CREDITS_PATH)
+	_check(not credits.is_empty(), "素材の記録: %s がある" % CREDITS_PATH)
+	var files: Array[String] = asset_files(ASSETS_DIR)
+	_check(not files.is_empty(), "素材の記録: %s に素材がある" % ASSETS_DIR)
+	for file: String in unrecorded_assets(files, credits):
+		_check(false, "素材の記録: %s が %s に記録されていない" % [file, CREDITS_PATH])
+
+
+## dir の下 (サブディレクトリを含む) の素材の、ASSETS_DIR からの相対パス。素材の記録 (CREDITS.md) と、
+## Godot がインポートで作るファイル (.import / .uid) は素材でないため除く
+static func asset_files(dir: String) -> Array[String]:
+	var files: Array[String] = []
+	for file: String in DirAccess.get_files_at(dir):
+		if file == CREDITS_PATH.get_file() or file.get_extension() in ["import", "uid"]:
+			continue
+		files.append(dir.path_join(file).trim_prefix(ASSETS_DIR + "/"))
+	for sub: String in DirAccess.get_directories_at(dir):
+		files.append_array(asset_files(dir.path_join(sub)))
+	return files
+
+
+## files (ASSETS_DIR からの相対パス) のうち、credits (CREDITS.md の本文) にバッククォートで囲んで書かれていないもの
+static func unrecorded_assets(files: Array[String], credits: String) -> Array[String]:
+	var missing: Array[String] = []
+	for file: String in files:
+		if not credits.contains("`%s`" % file):
+			missing.append(file)
+	return missing
 
 
 ## tree には入れず (_ready を走らせず) インスタンス化だけを確認して free する

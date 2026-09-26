@@ -20,6 +20,9 @@ const SAVE_TEST_PATH: String = "res://tmp/screenshot-save.json"
 ## 前の攻撃のクールダウンが終わるのを待つ物理フレーム数の上限。攻撃の間隔 (0.3 秒 = 18 フレーム) に余裕を持たせ、
 ## プレイ中でない画面でクールダウンが進まない時に撮影が止まらないようにする
 const COOLDOWN_FRAME_LIMIT: int = 60
+## 最後のメインシーンを消してから終了するまで待つ時間 (秒)。理由と値の根拠は scripts/dev/integration.gd の
+## AUDIO_RELEASE_TIME と同じ (消したシーンが鳴らしていた音の再生を AudioServer が解放するまで待つ)
+const AUDIO_RELEASE_TIME: float = 0.25
 
 
 ## tree の準備が終わってから _run() を始める (シーンの追加は _initialize() の後でないとできない)
@@ -35,6 +38,7 @@ func _run() -> void:
 	save_data.load_from(save_path)
 	if await _capture_scenes():
 		_remove_save_files(save_path)
+		await create_timer(AUDIO_RELEASE_TIME).timeout
 		quit(0)
 
 
