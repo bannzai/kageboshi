@@ -173,8 +173,9 @@ func _check_clear(main: Node2D, game_state: Node) -> Node2D:
 	return restarted
 
 
-## 画面の遷移でステージを作り直した後の、読み込み直されたメインシーン。主人公は最初の位置にいる
-func _reloaded_main(old_main: Node2D, label: String) -> Node2D:
+## 画面の遷移でステージを作り直した後の、読み込み直されたメインシーン。主人公は最初の位置にいる。
+## 遷移前のメインシーン old_main は呼び出しの時点で解放済みのことがあるため型を付けない
+func _reloaded_main(old_main: Variant, label: String) -> Node2D:
 	await process_frame
 	await _wait_physics_frames(2)
 	_check(not is_instance_valid(old_main), "%s: 遷移前のステージが消える" % label)
