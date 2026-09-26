@@ -93,8 +93,9 @@ movie: import
 	ffmpeg -v error -sseof -1 -i $(LOG_DIR)/movie.mp4 -frames:v 1 -vf signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=- -f null - \
 	  | awk -F= '/YAVG/ { found = 1; exit ($$2 >= 32) ? 0 : 1 } END { if (!found) exit 1 }'
 
-# エディタなしでゲームを起動する (手動確認用)
-run: $(LOG_DIR)/.gdignore
+# エディタなしでゲームを起動する (手動確認用)。先にアセットをインポートする (.godot/ が無い初回や素材の追加後に、
+# エディタを開かずに起動すると音声などの素材が読み込めず起動に失敗するため)
+run: import
 	"$(GODOT)" $(ENGINE_LOG) --path .
 
 # デスクトップ向けエクスポート。プリセット名は export_presets.cfg と一致させる。
