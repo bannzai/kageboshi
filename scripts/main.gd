@@ -1,6 +1,7 @@
 extends Node2D
 ## 上下 2 画面の横スクロール。上の画面に主人公と地形、下の画面に影と同じ形の地形を置き、
 ## 1 台のカメラで上下を同じ横スクロール量で映す。影は主人公と同じ動き・同じ攻撃をする。
+## 影縫いで影か主人公を縫い止めると上下の位置がずれ、引き寄せで同期に戻る。
 ## 敵は上下どちらの画面にも出て、主人公・影のどちらが触れても共有の体力 (GameState) が減る。
 
 ## 地形と敵の出現位置の定義
@@ -11,6 +12,8 @@ const Hero := preload("res://scripts/hero.gd")
 const Enemy := preload("res://scripts/enemy.gd")
 ## 攻撃の当たりと同期ボーナスの計算
 const Combat := preload("res://scripts/combat.gd")
+## 影縫いと引き寄せの計算
+const ShadowStitch := preload("res://scripts/shadow_stitch.gd")
 ## autoload の GameState のスクリプト。autoload 名の識別子で参照すると、--script で起動する
 ## scripts/dev/ の検証が autoload の登録前に main.gd をコンパイルして失敗するため、ノードとして取る
 const GameStateScript := preload("res://scripts/game_state.gd")
@@ -48,15 +51,27 @@ var swing_hits: Array[Enemy] = []
 var recent_hits: Array[Dictionary] = []
 ## 仕切り線の光を消していく途中の Tween。続けて同期ボーナスが出たら止めて光らせ直す
 var sync_flash_tween: Tween = null
+## 縫い止めているもの
+var pin: ShadowStitch.Pin = ShadowStitch.Pin.NONE
+## 影を縫い止めた位置 (下の画面の座標)。pin が SHADOW の間だけ使う
+var pinned_position: Vector2 = Vector2.ZERO
+## 同期中の影の位置 (shadow_position) からの影のずれ。ZERO なら同期している
+var shadow_offset: Vector2 = Vector2.ZERO
+## 引き寄せの途中か。ずれが 0 に戻ったら終わる
+var pulling: bool = false
 
 ## 主人公と影で共有する体力 (autoload の GameState)
 @onready var game_state: GameStateScript = get_node("/root/GameState")
 ## 上の画面の主人公
 @onready var hero: Hero = $Hero
-## 下の画面の影。位置は _sync_shadow() で主人公から導く
+## 下の画面の影。位置は _sync_shadow() で主人公とずれから導く
 @onready var shadow: Node2D = $Shadow
 ## 影の攻撃の見た目。主人公の攻撃の見た目から導く
 @onready var shadow_attack: ColorRect = $Shadow/Attack
+## 影を縫い止めている間に影の足元に刺す針の見た目
+@onready var shadow_needle: ColorRect = $Shadow/Needle
+## 主人公を縫い止めている間に主人公の足元に刺す針の見た目
+@onready var hero_needle: ColorRect = $Hero/Needle
 ## 上下の画面を同じスクロール量で映すカメラ
 @onready var camera: Camera2D = $Camera
 ## 上の画面の地形 (当たり判定と見た目) を入れる親
@@ -69,6 +84,10 @@ var sync_flash_tween: Tween = null
 @onready var sync_flash: ColorRect = $Overlay/SyncFlash
 ## 体力の表示
 @onready var hp_label: Label = $Overlay/HpLabel
+## 影縫いのゲージの枠
+@onready var gauge_bar: ColorRect = $Overlay/GaugeBar
+## 影縫いのゲージの残り
+@onready var gauge_fill: ColorRect = $Overlay/GaugeBar/Fill
 ## ゲームオーバーの表示
 @onready var game_over_panel: Control = $Overlay/GameOver
 
@@ -90,11 +109,15 @@ func _physics_process(delta: float) -> void:
 	var playing: bool = not game_state.is_game_over()
 	if playing and Input.is_action_just_pressed("attack") and hero.start_attack():
 		swing_hits.clear()
-	hero.physics_step(
-		Input.get_axis("move_left", "move_right") if playing else 0.0,
-		playing and Input.is_action_just_pressed("jump"),
-		delta
-	)
+	var direction: float = Input.get_axis("move_left", "move_right") if playing else 0.0
+	_update_pin(playing, delta)
+	if pin == ShadowStitch.Pin.HERO:
+		if direction != 0.0:
+			hero.facing = signf(direction)
+		hero.physics_step(0.0, false, delta)
+	else:
+		hero.physics_step(direction, playing and Input.is_action_just_pressed("jump"), delta)
+	_move_shadow_offset(direction, delta)
 	_sync_shadow()
 	_follow_camera()
 	_spawn_due_enemies()
@@ -150,11 +173,55 @@ func _terrain_rect(area: Rect2, color: Color) -> ColorRect:
 	return rect
 
 
-## 同期中の影の位置と攻撃は主人公から導く (.claude/rules/shadow-position-derived-from-hero.md)
+## 引き寄せ・影縫いの入力とゲージから、このフレームの縫い止めを決める。縫い止めている間はゲージを減らす。
+## playing が false (ゲームオーバー) の間は入力を受け付けない
+func _update_pin(playing: bool, delta: float) -> void:
+	var desynced: bool = pin != ShadowStitch.Pin.NONE or shadow_offset != Vector2.ZERO
+	if playing and desynced and Input.is_action_just_pressed("pull_shadow"):
+		pulling = true
+	var next: ShadowStitch.Pin = ShadowStitch.next_pin(
+		pin,
+		playing and Input.is_action_just_pressed("pin_shadow"),
+		playing and Input.is_action_pressed("pin_shadow"),
+		playing and Input.is_action_just_pressed("pin_hero"),
+		playing and Input.is_action_pressed("pin_hero"),
+		pulling,
+		game_state.has_gauge()
+	)
+	if next != pin:
+		if pin == ShadowStitch.Pin.SHADOW:
+			shadow_offset = ShadowStitch.released_offset(shadow_offset)
+		if next == ShadowStitch.Pin.SHADOW:
+			pinned_position = shadow.position
+		pin = next
+	if pin != ShadowStitch.Pin.NONE:
+		game_state.spend_gauge(delta)
+
+
+## 主人公が動いた後の影のずれを、縫い止め・引き寄せに合わせて進める。同期している間はゲージを回復する
+func _move_shadow_offset(direction: float, delta: float) -> void:
+	var synced: Vector2 = shadow_position(hero.position)
+	match pin:
+		ShadowStitch.Pin.SHADOW:
+			shadow_offset = ShadowStitch.pinned_offset(pinned_position, synced)
+		ShadowStitch.Pin.HERO:
+			shadow_offset = ShadowStitch.running_offset(shadow_offset, direction, synced, delta)
+		_:
+			if pulling:
+				shadow_offset = ShadowStitch.pulled_offset(shadow_offset, delta)
+				pulling = shadow_offset != Vector2.ZERO
+			if shadow_offset == Vector2.ZERO:
+				game_state.recover_gauge(delta)
+
+
+## 影の位置は主人公の位置とずれから、攻撃は主人公の攻撃から導く
+## (.claude/rules/shadow-position-derived-from-hero.md)
 func _sync_shadow() -> void:
-	shadow.position = shadow_position(hero.position)
+	shadow.position = shadow_position(hero.position) + shadow_offset
 	shadow_attack.visible = hero.attack_visual.visible
 	shadow_attack.position = hero.attack_visual.position
+	shadow_needle.visible = pin == ShadowStitch.Pin.SHADOW
+	hero_needle.visible = pin == ShadowStitch.Pin.HERO
 
 
 func _follow_camera() -> void:
@@ -190,8 +257,9 @@ func _is_living(enemy: Variant) -> bool:
 func _resolve_attack_hits() -> void:
 	if not hero.is_attacking():
 		return
-	var top_area: Rect2 = Hero.attack_area(hero.position, hero.facing)
-	var areas: Array[Rect2] = [top_area, Rect2(shadow_position(top_area.position), top_area.size)]
+	var areas: Array[Rect2] = [
+		Hero.attack_area(hero.position, hero.facing), Hero.attack_area(shadow.position, hero.facing)
+	]
 	var hits: Array[Enemy] = []
 	for enemy: Enemy in _living_enemies():
 		if not swing_hits.has(enemy) and areas[enemy.lane].intersects(enemy.body_rect()):
@@ -226,9 +294,7 @@ func _resolve_attack_hits() -> void:
 
 ## 上の画面の敵が主人公に、下の画面の敵が影に触れていたら体力を減らす
 func _resolve_contact_damage() -> void:
-	var bodies: Array[Rect2] = [
-		hero.body_rect(), Rect2(shadow_position(hero.position), Hero.SIZE)
-	]
+	var bodies: Array[Rect2] = [hero.body_rect(), Rect2(shadow.position, Hero.SIZE)]
 	for enemy: Enemy in _living_enemies():
 		if bodies[enemy.lane].intersects(enemy.body_rect()):
 			game_state.take_damage(CONTACT_DAMAGE)
@@ -257,16 +323,17 @@ func _show_sync_effect() -> void:
 	sync_flash_tween.tween_property(sync_flash, "modulate:a", 0.0, SYNC_EFFECT_TIME)
 
 
-## 体力・ゲームオーバーの表示と、無敵の間の主人公・影の半透明を GameState に合わせる
+## 体力・影縫いのゲージ・ゲームオーバーの表示と、無敵の間の主人公・影の半透明を GameState に合わせる
 func _update_hud() -> void:
 	hp_label.text = "HP %d / %d" % [game_state.hp, game_state.MAX_HP]
+	gauge_fill.size.x = gauge_bar.size.x * game_state.gauge / game_state.MAX_GAUGE
 	game_over_panel.visible = game_state.is_game_over()
 	var alpha: float = INVINCIBLE_ALPHA if game_state.is_invincible() else 1.0
 	hero.modulate.a = alpha
 	shadow.modulate.a = alpha
 
 
-## 同期中の影の位置。主人公の位置から上の画面 1 つ分下
+## 同期中の影の位置。主人公の位置から上の画面 1 つ分下。ずれている間の影はここから shadow_offset だけ離れる
 static func shadow_position(hero_position: Vector2) -> Vector2:
 	return hero_position + Vector2(0.0, SCREEN_HEIGHT)
 
