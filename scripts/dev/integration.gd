@@ -1,9 +1,12 @@
 extends SceneTree
 ## キー入力 (InputMap を通る InputEventKey) でメインシーンの主人公を動かし、地形との当たり判定・スクロール、
 ## 下の画面の影が同じ動き・同じ攻撃をすること、敵を倒す・ダメージを受ける・ゲームオーバー・同期ボーナスと、
-## タイトル・ポーズ・ゲームオーバー・ステージクリアの画面の遷移、昼・夕方・夜の各ステージが読み込まれて最初の位置から
-## ゴールに着けること、ステージクリアから次のステージへ進むこと、光源をまたいだ反転区間で影の左右の動きと
-## 攻撃の向きが逆になり、光源の高さで伸び縮みすることを検証する。実行方法は AGENTS.md を参照。
+## タイトル・ポーズ・ゲームオーバー・ステージクリア・設定の画面の遷移、昼・夕方・夜の各ステージが読み込まれて
+## 最初の位置からゴールに着けること、ステージクリアから次のステージへ進むこと、光源をまたいだ反転区間で影の左右の
+## 動きと攻撃の向きが逆になり、光源の高さで伸び縮みすること、影縫い・ゲージ切れ・引き寄せで上下がずれて同期に
+## 戻ること、クリアしたステージの保存、設定画面での音量とキー割り当ての変更と保存を検証する。
+## 実行方法は AGENTS.md を参照。
+## 保存データはプレイヤーのもの (user://) を書き換えないよう SAVE_TEST_PATH に書き、最後に消す。
 ## 失敗したら quit(1) で終わる。
 
 ## ステージ 1 本の定義 (地面の位置・地形・光源・ゴールの期待値に使う)
@@ -20,6 +23,10 @@ const Enemy := preload("res://scripts/enemy.gd")
 const Combat := preload("res://scripts/combat.gd")
 ## 画面 (Screen) の定義を持つ autoload の GameState のスクリプト
 const GameStateScript := preload("res://scripts/game_state.gd")
+## 設定と進行の保存・読み込みを持つ autoload の SaveData のスクリプト
+const SaveDataScript := preload("res://scripts/save_data.gd")
+## 検証中の保存データの置き場所
+const SAVE_TEST_PATH: String = "res://tmp/integration-save.json"
 ## 位置の比較で許す誤差 (px)。CharacterBody2D は地形から safe_margin (0.08 px) だけ離れて止まる
 const POSITION_TOLERANCE: float = 1.0
 ## 昼のステージの最初の段差 (Stages.DAY_OBSTACLES の 1 番目)
@@ -50,8 +57,15 @@ func _run() -> void:
 		_check(Stages.DAY_OBSTACLES.has(rect), "前提: 昼のステージの地形に %s がある" % rect)
 	var game_state: Node = root.get_node_or_null("GameState")
 	_check(game_state != null, "前提: autoload の GameState が root にある")
-	if game_state != null:
-		await _run_scenes(game_state)
+	var save_data: Node = root.get_node_or_null("SaveData")
+	_check(save_data != null, "前提: autoload の SaveData が root にある")
+	if game_state != null and save_data != null:
+		var save_path: String = ProjectSettings.globalize_path(SAVE_TEST_PATH)
+		_remove_file(save_path)
+		save_data.load_from(save_path)
+		await _run_scenes(game_state, save_data)
+		_remove_file(save_path)
+		save_data.load_from(save_path)
 	if failed:
 		quit(1)
 	else:
@@ -60,7 +74,7 @@ func _run() -> void:
 
 
 ## メインシーンを置いて各検証を順に行う。読み込み直したメインシーンが無ければ (失敗として記録済み) そこでやめる
-func _run_scenes(game_state: Node) -> void:
+func _run_scenes(game_state: Node, save_data: Node) -> void:
 	var main: Node2D = await _start_main(game_state)
 	await _check_move_and_jump(main)
 	await _check_terrain_and_scroll(main)
@@ -77,8 +91,13 @@ func _run_scenes(game_state: Node) -> void:
 		main = await _check_stage(main, game_state, index)
 		if main == null:
 			return
-	await _play_from_title(main, game_state, "全ステージのクリア後にタイトルから始める")
+	_check_progress_saved(main, save_data)
+	main = await _check_settings(main, game_state, save_data)
+	if main == null:
+		return
+	await _play_from_title(main, game_state, "設定の後にタイトルから始める")
 	_check(game_state.stage_index == 0, "全ステージのクリア後: 最初のステージから遊ぶ")
+	await _check_stitch_and_pull(main, game_state)
 	main.queue_free()
 	await process_frame
 
@@ -250,6 +269,109 @@ func _run_to_goal(main: Node2D, game_state: Node, stage: Stage, label: String) -
 		hero.body_rect().intersects(stage.goal()),
 		"%s: ステージクリアになった時、主人公がゴールに入っている" % label
 	)
+
+
+## 全ステージのクリアでクリアしたステージが遊んだ順に保存され、タイトルに進行が出る
+func _check_progress_saved(main: Node2D, save_data: Node) -> void:
+	var ids: Array[String] = []
+	for stage: Stage in Stages.all():
+		ids.append(stage.id)
+	_check(save_data.cleared_stages == ids, "進行: クリアしたステージを覚える")
+	var saved: Dictionary = SaveDataScript.parse(FileAccess.get_file_as_string(save_data.path))
+	_check(saved["cleared_stages"] == ids, "進行: クリアしたステージを保存データに書く")
+	_check(main.get_node("Screens/Title/Progress").visible, "進行: タイトルにクリアしたステージの数が出る")
+
+
+## タイトルから S キーで設定画面を開き、音量とキー割り当てを変えて保存する。変えたキーで遊べ、
+## 保存データを読み直しても変えたキーのまま。最後にキー割り当てを既定に戻す
+func _check_settings(main: Node2D, game_state: Node, save_data: Node) -> Node2D:
+	var menu: Node = await _open_settings(main, game_state, "設定")
+	var rebindable: Array[String] = SaveDataScript.rebindable_actions()
+	_check(
+		menu.rows.size() == SaveDataScript.VOLUME_BUSES.size() + rebindable.size() + 1,
+		"設定: 音量・変えられるアクションごとのキー・既定に戻す行が並ぶ"
+	)
+	await _hold_keys([KEY_LEFT], 1)
+	await _hold_keys([KEY_LEFT], 1)
+	var bgm: int = AudioServer.get_bus_index("BGM")
+	_check(is_equal_approx(save_data.volumes["BGM"], 0.8), "設定: 左キーで BGM の音量が下がる")
+	_check(
+		is_equal_approx(AudioServer.get_bus_volume_db(bgm), linear_to_db(0.8)),
+		"設定: BGM の音量をバスに反映する"
+	)
+	await _hold_keys([KEY_DOWN], 1)
+	for _i: int in range(SaveDataScript.VOLUME_STEPS + 1):
+		await _hold_keys([KEY_LEFT], 1)
+	_check(save_data.volumes["SE"] == 0.0, "設定: 効果音の音量は 0 より下がらない")
+	_check(AudioServer.is_bus_mute(AudioServer.get_bus_index("SE")), "設定: 効果音の音量 0 でミュートになる")
+	var saved: Dictionary = SaveDataScript.parse(FileAccess.get_file_as_string(save_data.path))
+	_check(
+		is_equal_approx(saved["volumes"]["BGM"], 0.8) and saved["volumes"]["SE"] == 0.0,
+		"設定: 変えた音量を保存データに書く"
+	)
+
+	for _i: int in range(rebindable.find("jump") + 1):
+		await _hold_keys([KEY_DOWN], 1)
+	await _hold_keys([KEY_ENTER], 1)
+	_check(menu.waiting_action == "jump", "設定: Enter キーでジャンプのキーを待つ")
+	_check(game_state.screen == GameStateScript.Screen.SETTINGS, "設定: キーを待つ間も設定画面のまま")
+	await _hold_keys([KEY_H], 1)
+	_check(SaveDataScript.action_keys("jump") == [KEY_H], "設定: 押した H キーがジャンプのキーになる")
+	_check(save_data.key_overrides() == {"jump": [KEY_H]}, "設定: 変えたキー割り当てを保存する")
+	await _hold_keys([KEY_ESCAPE], 1)
+	await _wait_physics_frames(2)
+	_check(game_state.screen == GameStateScript.Screen.TITLE, "設定: Esc キーでタイトルに戻る")
+	_check(is_instance_valid(main), "設定: タイトルに戻ってもステージを作り直さない")
+	_check(not menu.visible, "設定: タイトルに戻ると設定画面が消える")
+
+	var hero: Hero = main.get_node("Hero")
+	await _hold_keys([KEY_ENTER], 1)
+	await _wait_physics_frames(2)
+	await _hold_keys([KEY_SPACE], 3)
+	_check(hero.is_on_floor(), "設定: 変える前のジャンプのキー (スペース) では跳ばない")
+	await _hold_keys([KEY_H], 3)
+	_check(not hero.is_on_floor(), "設定: 変えたジャンプのキー (H) で跳ぶ")
+
+	save_data.load_from(save_data.path)
+	_check(SaveDataScript.action_keys("jump") == [KEY_H], "設定: 保存データを読み直しても変えたキーのまま")
+	_check(is_equal_approx(save_data.volumes["BGM"], 0.8), "設定: 保存データを読み直しても変えた音量のまま")
+
+	await _hold_keys([KEY_ESCAPE], 1)
+	await _hold_keys([KEY_Q], 1)
+	var restarted: Node2D = await _reloaded_main(main, "設定の後にタイトルへ戻る")
+	if restarted == null:
+		return null
+	menu = await _open_settings(restarted, game_state, "既定に戻す")
+	await _hold_keys([KEY_UP], 1)
+	await _hold_keys([KEY_ENTER], 1)
+	_check(save_data.key_overrides().is_empty(), "設定: Reset Keys でキー割り当てが既定に戻る")
+	_check(
+		SaveDataScript.action_keys("jump") == SaveDataScript.default_bindings()["jump"],
+		"設定: 既定に戻したジャンプのキーが InputMap に反映される"
+	)
+	await _hold_keys([KEY_ESCAPE], 1)
+	await _wait_physics_frames(2)
+	_check(game_state.screen == GameStateScript.Screen.TITLE, "既定に戻す: Esc キーでタイトルに戻る")
+	return restarted
+
+
+## タイトルで S キーを押して設定画面を開き、設定画面のノードを返す
+func _open_settings(main: Node2D, game_state: Node, label: String) -> Node:
+	_check(game_state.screen == GameStateScript.Screen.TITLE, "%s: タイトルから始める" % label)
+	await _hold_keys([KEY_S], 1)
+	await _wait_physics_frames(2)
+	var menu: Node = main.get_node("Screens/Settings")
+	_check(game_state.screen == GameStateScript.Screen.SETTINGS, "%s: S キーで設定画面になる" % label)
+	_check(menu.visible, "%s: 設定画面が表示される" % label)
+	_check(not main.get_node("Screens/Title").visible, "%s: 設定画面ではタイトルが消える" % label)
+	_check(not main.get_node("Overlay/HpLabel").visible, "%s: 設定画面では体力を表示しない" % label)
+	return menu
+
+
+## path のファイルがあれば消す
+func _remove_file(path: String) -> void:
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
 
 
 ## 画面の遷移でステージを作り直した後の、読み込み直されたメインシーン。主人公は最初の位置にいる。
@@ -446,6 +568,137 @@ func _hold_key_until(physical_keycode: Key, reached: Callable) -> void:
 	Input.parse_input_event(_key_event(physical_keycode, false))
 	await physics_frame
 	_check(frames_left > 0, "移動: %d フレーム以内に目標の位置へ着く" % MOVE_FRAME_LIMIT)
+
+
+## 主人公を最初の位置 (光源の反転区間の外) に戻してから、ポーズ中は K キーの影縫いを受け付けないこと、
+## K キーで影を縫い止めて主人公だけが動き、離してもずれたまま主人公と同じ動きをして、I キーの引き寄せで
+## 同期に戻ることを確かめる。L キーで主人公を止めて影だけが動き、その最中の引き寄せでも同期に戻る。
+## 縫い止め続けるとゲージが切れて解除される
+func _check_stitch_and_pull(main: Node2D, game_state: Node) -> void:
+	var hero: Hero = main.get_node("Hero")
+	var shadow: Node2D = main.get_node("Shadow")
+	var shadow_needle: CanvasItem = main.get_node("Shadow/Needle")
+	var hero_needle: CanvasItem = main.get_node("Hero/Needle")
+	hero.position = hero_start
+	hero.velocity = Vector2.ZERO
+	await _wait_physics_frames(3)
+	_clear_enemies(main)
+	_check_synced(main, "影縫いの前")
+	_check(game_state.gauge == game_state.MAX_GAUGE, "影縫い: 最初はゲージが満タン")
+	_check(main.get_node("Overlay/GaugeBar").visible, "影縫い: プレイ中はゲージを表示する")
+
+	await _hold_keys([KEY_ESCAPE], 1)
+	await _hold_keys([KEY_K], 10)
+	_check(not shadow_needle.visible, "影縫い: ポーズ中は K キーで縫い止めない")
+	_check(game_state.gauge == game_state.MAX_GAUGE, "影縫い: ポーズ中はゲージが減らない")
+	await _hold_keys([KEY_ESCAPE], 1)
+	_check(game_state.is_playing(), "影縫い: Esc キーでプレイ中に戻る")
+	await _wait_physics_frames(2)
+	_check(not shadow_needle.visible, "影縫い: ポーズ中に押した K キーは再開後も縫い止めにならない")
+
+	var shadow_start: Vector2 = shadow.position
+	var hero_start_x: float = hero.position.x
+	_press_keys([KEY_K, KEY_RIGHT], true)
+	await _wait_physics_frames(30)
+	_check(hero.position.x > hero_start_x + 100.0, "影縫い: K キーを押している間も主人公は右へ進む")
+	_check(
+		shadow.position.distance_to(shadow_start) < POSITION_TOLERANCE,
+		"影縫い: K キーを押している間は影が縫い止めた位置に残る"
+	)
+	_check(shadow_needle.visible, "影縫い: 縫い止めた影に針が刺さる")
+	_check(game_state.gauge < game_state.MAX_GAUGE, "影縫い: 縫い止めている間はゲージが減る")
+
+	_press_keys([KEY_K], false)
+	await physics_frame
+	var offset_x: float = shadow.position.x - hero.position.x
+	var gauge_left: float = game_state.gauge
+	var released_x: float = hero.position.x
+	await _wait_physics_frames(10)
+	_press_keys([KEY_RIGHT], false)
+	await physics_frame
+	_check(not shadow_needle.visible, "影縫い: K キーを離すと針が消える")
+	_check(offset_x < -100.0, "影縫い: K キーを離しても影は縫い止めた分だけずれたまま")
+	_check(hero.position.x > released_x, "影縫い: 離した後も主人公は右へ進む")
+	_check(
+		absf(shadow.position.x - hero.position.x - offset_x) < POSITION_TOLERANCE,
+		"影縫い: 離した後は、ずれたまま影が主人公と同じ動きをする"
+	)
+	_check(
+		absf(shadow.position.y - hero.position.y - main.SCREEN_HEIGHT) < POSITION_TOLERANCE,
+		"影縫い: 離した後の影は主人公と同じ高さに戻る"
+	)
+	_check(game_state.gauge == gauge_left, "影縫い: ずれている間はゲージが回復しない")
+
+	await _hold_keys([KEY_I], 1)
+	await _wait_physics_frames(40)
+	_check_synced(main, "引き寄せ後")
+	var gauge_synced: float = game_state.gauge
+	await _wait_physics_frames(10)
+	_check(game_state.gauge > gauge_synced, "引き寄せ: 同期に戻るとゲージが回復する")
+
+	await _hold_keys([KEY_SPACE], 3)
+	_press_keys([KEY_L], true)
+	await physics_frame
+	var held_y: float = hero.position.y
+	_check(not hero.is_on_floor(), "逆の影縫い: ジャンプ中に L キーを押す")
+	await _wait_physics_frames(20)
+	_check(
+		absf(hero.position.y - held_y) < POSITION_TOLERANCE,
+		"逆の影縫い: 空中で止めた主人公は落ちない (y = %.2f → %.2f)" % [held_y, hero.position.y]
+	)
+	_press_keys([KEY_L], false)
+	await _wait_physics_frames(60)
+	_check(hero.is_on_floor(), "逆の影縫い: L キーを離すと主人公が落ちて着地する")
+	_check_synced(main, "空中で止めて離した後")
+
+	var stopped_x: float = hero.position.x
+	_press_keys([KEY_L, KEY_RIGHT, KEY_SPACE], true)
+	await _wait_physics_frames(30)
+	_check(absf(hero.position.x - stopped_x) < POSITION_TOLERANCE, "逆の影縫い: L キーで主人公が止まる")
+	_check(hero.is_on_floor(), "逆の影縫い: 主人公を止めている間はジャンプもしない")
+	_check(shadow.position.x > stopped_x + 100.0, "逆の影縫い: 影だけが右へ進む")
+	_check(hero_needle.visible, "逆の影縫い: 止めた主人公に針が刺さる")
+	_press_keys([KEY_RIGHT, KEY_SPACE], false)
+	await _hold_keys([KEY_I], 1)
+	await _wait_physics_frames(40)
+	_check(not hero_needle.visible, "引き寄せ: 逆の影縫いの最中に引き寄せると縫い止めが解ける")
+	_check_synced(main, "逆の影縫いの最中の引き寄せ後 (L キーは押したまま)")
+	_press_keys([KEY_L], false)
+	await physics_frame
+
+	game_state.gauge = game_state.MAX_GAUGE
+	var drain_frames: int = int(game_state.MAX_GAUGE / game_state.GAUGE_DRAIN * 60.0)
+	_press_keys([KEY_K, KEY_RIGHT], true)
+	await _wait_physics_frames(20)
+	_press_keys([KEY_RIGHT], false)
+	await _wait_physics_frames(drain_frames)
+	_check(not game_state.has_gauge(), "ゲージ切れ: 縫い止め続けるとゲージが 0 になる")
+	_check(not shadow_needle.visible, "ゲージ切れ: K キーを押したままでも縫い止めが解除される")
+	var empty_offset_x: float = shadow.position.x - hero.position.x
+	var before_left_x: float = hero.position.x
+	await _hold_keys([KEY_LEFT], 10)
+	_check(hero.position.x < before_left_x, "ゲージ切れ: 主人公は左へ進む")
+	_check(
+		absf(shadow.position.x - hero.position.x - empty_offset_x) < POSITION_TOLERANCE,
+		"ゲージ切れ: 解除された影は、ずれたまま主人公と同じ動きをする"
+	)
+	_check(empty_offset_x < -50.0, "ゲージ切れ: 解除されてもずれは残る")
+	_press_keys([KEY_K], false)
+	await _hold_keys([KEY_LEFT], 120)
+	_check(hero.position.x < POSITION_TOLERANCE, "ステージの端: 主人公がステージの左端まで戻る")
+	_check(
+		shadow.position.x > -POSITION_TOLERANCE,
+		"ステージの端: 左にずれた影はステージの左端より外に出ない (x = %.2f)" % shadow.position.x
+	)
+	await _hold_keys([KEY_I], 1)
+	await _wait_physics_frames(40)
+	_check_synced(main, "ゲージ切れの後の引き寄せ後")
+
+
+## physical_keycodes (Key の配列) のキーを押す (pressed = true) / 離す (false)
+func _press_keys(physical_keycodes: Array, pressed: bool) -> void:
+	for keycode: Key in physical_keycodes:
+		Input.parse_input_event(_key_event(keycode, pressed))
 
 
 ## 攻撃キーを 1 物理フレームだけ押して離す

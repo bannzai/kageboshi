@@ -12,6 +12,8 @@ const GOAL_WIDTH: float = 80.0
 ## 左右の端の見えない壁・見えない天井の厚み
 const BOUND_THICKNESS: float = 40.0
 
+## ステージの ID。クリアしたステージとして保存データ (scripts/save_data.gd) に書く。変えると保存済みの進行が外れる
+var id: String = ""
 ## 画面に出すステージの名前
 var title: String = ""
 ## ステージの横幅。カメラはこの範囲の外を映さない
@@ -33,6 +35,7 @@ var lights: Array[Dictionary] = []
 
 ## 各引数は同じ名前 (stage_ を除いた名前) のプロパティの値
 func _init(
+	stage_id: String,
 	stage_title: String,
 	stage_width: float,
 	stage_sky: Color,
@@ -40,6 +43,7 @@ func _init(
 	stage_spawns: Array[Dictionary],
 	stage_lights: Array[Dictionary]
 ) -> void:
+	id = stage_id
 	title = stage_title
 	width = stage_width
 	sky = stage_sky

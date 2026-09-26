@@ -83,9 +83,16 @@ const NIGHT_LIGHTS: Array[Dictionary] = [
 static func all() -> Array[Stage]:
 	var stages: Array[Stage] = [
 		Stage.new(
-			"DAY", 3200.0, Color(0.79, 0.84, 0.89, 1.0), DAY_OBSTACLES, DAY_SPAWNS, DAY_LIGHTS
+			"stage1",
+			"DAY",
+			3200.0,
+			Color(0.79, 0.84, 0.89, 1.0),
+			DAY_OBSTACLES,
+			DAY_SPAWNS,
+			DAY_LIGHTS
 		),
 		Stage.new(
+			"stage2",
 			"EVENING",
 			3400.0,
 			Color(0.93, 0.64, 0.45, 1.0),
@@ -94,7 +101,13 @@ static func all() -> Array[Stage]:
 			EVENING_LIGHTS
 		),
 		Stage.new(
-			"NIGHT", 3600.0, Color(0.11, 0.13, 0.25, 1.0), NIGHT_OBSTACLES, NIGHT_SPAWNS, NIGHT_LIGHTS
+			"stage3",
+			"NIGHT",
+			3600.0,
+			Color(0.11, 0.13, 0.25, 1.0),
+			NIGHT_OBSTACLES,
+			NIGHT_SPAWNS,
+			NIGHT_LIGHTS
 		),
 	]
 	return stages
