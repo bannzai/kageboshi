@@ -7,7 +7,7 @@ extends SceneTree
 const MAIN_SCENE: PackedScene = preload("res://scenes/main.tscn")
 ## 敵の出現先の画面 (Lane)
 const Combat := preload("res://scripts/combat.gd")
-## 地面・光源・ゴールの位置
+## 地面の位置
 const Stage := preload("res://scripts/stage.gd")
 ## 主人公のスクリプト (体の大きさ)
 const Hero := preload("res://scripts/hero.gd")
@@ -31,8 +31,9 @@ func _run() -> void:
 
 ## 撮影する画面の並び (起動直後のタイトル → プレイ開始 → 段差の手前でジャンプした瞬間 → 段差の上 →
 ## 右へスクロールして壁の手前 → ポーズ → 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス →
-## 敵に触れ続けたゲームオーバー → リトライしてゴールに入ったステージクリア →
-## 光源の手前で見える反転区間の予兆 → 高い光源の反転区間で逆へ動いて縮んだ影の攻撃 → 低い光源の反転区間で伸びた影の攻撃)。
+## 敵に触れ続けたゲームオーバー → リトライした昼のステージで光源の手前で見える反転区間の予兆 →
+## 高い光源の反転区間で逆へ動いて縮んだ影の攻撃 → ゴールに入ったステージクリア → 夕方のステージの開始 →
+## 低い光源の反転区間で伸びた影の攻撃 → 夜のステージで点在する光源 → 最後のステージのクリア)。
 ## 失敗した撮影は _capture() が quit(1) 済みなので、false を受けたらそのまま抜ける。
 func _capture_scenes() -> bool:
 	if not await _capture_title():
@@ -41,7 +42,11 @@ func _capture_scenes() -> bool:
 		return false
 	if not await _capture_combat():
 		return false
-	return await _capture_lights()
+	if not await _capture_day_lights():
+		return false
+	if not await _capture_evening():
+		return false
+	return await _capture_night()
 
 
 ## メインシーンを置いてタイトルを撮り、Enter キーでプレイを始めた直後を撮る
@@ -82,7 +87,8 @@ func _capture_terrain_and_scroll() -> bool:
 	return true
 
 
-## プレイ中のまま新しいメインシーンを置く (GameState の画面は前のシーンから引き継ぐ)
+## プレイ中のまま新しいメインシーンを置き (GameState の画面は前のシーンから引き継ぐ)、敵・同期ボーナス・
+## ゲームオーバーを撮ってから Enter キーでリトライする
 func _capture_combat() -> bool:
 	_add_main()
 	var main: Node = current_scene
@@ -106,50 +112,81 @@ func _capture_combat() -> bool:
 	await create_timer(0.2).timeout
 	if not await _capture("tmp/screenshot-gameover.png"):
 		return false
-	await _hold_keys([KEY_ENTER], 1)
-	await process_frame
-	await _wait_physics_frames(2)
-	var retried: Node2D = current_scene
-	retried.get_node("Hero").position.x = Stage.GOAL.position.x - 50.0
-	Input.parse_input_event(_key_event(KEY_RIGHT, true))
-	for _i: int in range(60):
-		if game_state.screen == GameStateScript.Screen.CLEAR:
-			break
-		await physics_frame
-	Input.parse_input_event(_key_event(KEY_RIGHT, false))
-	await create_timer(0.2).timeout
-	if not await _capture("tmp/screenshot-clear.png"):
-		return false
-	retried.queue_free()
-	await process_frame
+	await _next_scene()
 	return true
 
 
-## ステージクリアの画面のまま新しいメインシーンを置き、Enter キーでタイトルに戻してからもう一度 Enter キーで
-## プレイを始め、読み込み直されたメインシーンで光源の予兆と反転区間の影を撮る
-func _capture_lights() -> bool:
-	_add_main()
-	await create_timer(0.3).timeout
-	await _hold_keys([KEY_ENTER], 1)
-	await process_frame
-	await _wait_physics_frames(2)
-	await _hold_keys([KEY_ENTER], 1)
-	await _wait_physics_frames(2)
+## リトライした昼のステージで光源の予兆と、高い光源の反転区間で縮んだ影の攻撃を撮り、ゴールに入ったステージクリアを撮る
+func _capture_day_lights() -> bool:
 	var main: Node2D = current_scene
-	var high: Dictionary = Stage.LIGHTS[0]
+	var high: Dictionary = main.stage.lights[0]
 	await _place_hero(main, high["x"] - 130.0)
 	if not await _capture("tmp/screenshot-light-omen.png"):
 		return false
 	await _hold_keys([KEY_RIGHT], 47)
 	if not await _capture_attack(main, "tmp/screenshot-light-reverse.png"):
 		return false
-	var low: Dictionary = Stage.LIGHTS[1]
+	return await _capture_clear(main, "tmp/screenshot-clear.png")
+
+
+## ステージクリアから Enter キーで進んだ夕方のステージの開始と、低い光源の反転区間で伸びた影の攻撃を撮り、
+## ゴールまで進める
+func _capture_evening() -> bool:
+	var main: Node2D = await _next_scene()
+	await create_timer(0.2).timeout
+	if not await _capture("tmp/screenshot-stage-evening.png"):
+		return false
+	var low: Dictionary = main.stage.lights[0]
 	await _place_hero(main, low["x"] + low["zone"] / 2.0)
 	if not await _capture_attack(main, "tmp/screenshot-light-long.png"):
 		return false
-	main.queue_free()
-	await process_frame
+	return await _reach_goal(main)
+
+
+## ステージクリアから Enter キーで進んだ夜のステージで、点在する光源が 2 本見える位置を撮り、最後のステージの
+## クリアを撮る
+func _capture_night() -> bool:
+	var main: Node2D = await _next_scene()
+	var second: Dictionary = main.stage.lights[1]
+	await _place_hero(main, second["x"] - 130.0)
+	if not await _capture("tmp/screenshot-stage-night.png"):
+		return false
+	return await _capture_clear(main, "tmp/screenshot-clear-last.png")
+
+
+## main の主人公をゴールの手前に置いて右キーでゴールに入れ、ステージクリアを path へ撮影する
+func _capture_clear(main: Node2D, path: String) -> bool:
+	if not await _reach_goal(main):
+		return false
+	await create_timer(0.2).timeout
+	return await _capture(path)
+
+
+## main の主人公をゴールの手前に置き、ステージクリアになるまで右キーを押す。ならなければ quit(1) する。
+## 置いた直後に出現する敵に触れて半透明になった姿を撮らないよう、ゴールの近くの敵から離れた位置に置く
+func _reach_goal(main: Node2D) -> bool:
+	var game_state: Node = root.get_node("GameState")
+	await _place_hero(main, main.stage.goal().position.x - 150.0)
+	Input.parse_input_event(_key_event(KEY_RIGHT, true))
+	for _i: int in range(60):
+		if game_state.screen == GameStateScript.Screen.CLEAR:
+			break
+		await physics_frame
+	Input.parse_input_event(_key_event(KEY_RIGHT, false))
+	await physics_frame
+	if game_state.screen != GameStateScript.Screen.CLEAR:
+		push_error("ゴールに入ってもステージクリアにならない: %s" % main.stage.title)
+		quit(1)
+		return false
 	return true
+
+
+## Enter キーで画面を移し、読み込み直されたメインシーンを返す
+func _next_scene() -> Node2D:
+	await _hold_keys([KEY_ENTER], 1)
+	await process_frame
+	await _wait_physics_frames(2)
+	return current_scene
 
 
 ## 前の攻撃から次の攻撃を始められるまで待って攻撃キーを押し、影の攻撃が表示されている間に path へ撮影する。
