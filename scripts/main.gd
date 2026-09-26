@@ -1,13 +1,16 @@
 extends Node2D
 ## 上下 2 画面の横スクロール。上の画面に主人公と地形、下の画面に影と同じ形の地形を置き、
-## 1 台のカメラで上下を同じ横スクロール量で映す。影は主人公と同じ動き・同じ攻撃をする。
+## 1 台のカメラで上下を同じ横スクロール量で映す。影は主人公と同じ動き・同じ攻撃をし、光源をまたいだ先の反転区間でだけ
+## 左右の動きが逆になり、光源の高さで伸び縮みする (scripts/light.gd)。
 ## 敵は上下どちらの画面にも出て、主人公・影のどちらが触れても共有の体力 (GameState) が減る。
 ## ステージが進むのはプレイ中の画面の間だけで、タイトル・ポーズ・ゲームオーバー・ステージクリア・設定の画面は
 ## GameState の画面に合わせて重ねて表示する。ステージを最初からやり直す時はこのシーンを読み込み直す。
 ## ゴールに着いたらステージをクリア済みとして SaveData に保存する。
 
-## 地形と敵の出現位置の定義
+## 地形・敵の出現位置・光源の定義
 const Stage := preload("res://scripts/stage.gd")
+## 光源による影の反転と倍率の計算
+const Light := preload("res://scripts/light.gd")
 ## 主人公のスクリプト (体の大きさ・攻撃の範囲と 1 物理フレームの進め方)
 const Hero := preload("res://scripts/hero.gd")
 ## 敵のスクリプト (体の大きさ)
@@ -39,6 +42,16 @@ const INVINCIBLE_ALPHA: float = 0.5
 const SYNC_COLOR: Color = Color(1.0, 0.82, 0.25, 1.0)
 ## 同期ボーナスの演出の長さ (秒)
 const SYNC_EFFECT_TIME: float = 0.6
+## 光源の柱の色
+const LAMP_POST_COLOR: Color = Color(0.25, 0.22, 0.2, 1.0)
+## 光源の灯りと、反転区間を照らす光・下の画面の帯の矢印の色
+const LAMP_LIGHT_COLOR: Color = Color(1.0, 0.86, 0.45, 1.0)
+## 上の画面で反転区間を照らす光の不透明度 (地形・敵が透けて見える薄さにする)
+const LAMP_BEAM_ALPHA: float = 0.3
+## 下の画面で、反転区間の影が逆へ動く範囲の帯の色 (下の画面の背景より明るくし、影が逆へ動く所だと分かるようにする)
+const REVERSE_ZONE_COLOR: Color = Color(0.5, 0.45, 0.3, 0.35)
+## 下の画面の帯に並べる左向きの矢印の間隔 (px)。矢印どうしの間を矢印 1 つ分以上空け、並んだ矢印だと読めるようにする
+const REVERSE_ARROW_SPACING: float = 48.0
 ## ゴールの目印の色
 const GOAL_COLOR: Color = Color(1.0, 0.82, 0.25, 0.45)
 ## 画面を切り替える入力のアクションと、GameState に送る操作。設定画面を閉じる操作 (BACK) は、設定画面のキー割り当ての
@@ -80,7 +93,9 @@ var sync_flash_tween: Tween = null
 @onready var hero: Hero = $Hero
 ## 下の画面の影。位置は _sync_shadow() で主人公から導く
 @onready var shadow: Node2D = $Shadow
-## 影の攻撃の見た目。主人公の攻撃の見た目から導く
+## 影の体の見た目。高さは光源の倍率で伸び縮みする
+@onready var shadow_body: ColorRect = $Shadow/Body
+## 影の攻撃の見た目。主人公の攻撃から導く
 @onready var shadow_attack: ColorRect = $Shadow/Attack
 ## 上下の画面を同じスクロール量で映すカメラ
 @onready var camera: Camera2D = $Camera
@@ -88,6 +103,8 @@ var sync_flash_tween: Tween = null
 @onready var top_terrain: Node2D = $TopTerrain
 ## 下の画面の地形 (見た目だけ) を入れる親。上の画面 1 つ分下にずらしてある
 @onready var bottom_terrain: Node2D = $BottomTerrain
+## 光源と反転区間の予兆 (見た目だけ) を入れる親
+@onready var lights: Node2D = $Lights
 ## 上下の画面の敵を入れる親
 @onready var enemies: Node2D = $Enemies
 ## 上下の画面の仕切り線に重ねる光。同期ボーナスの時だけ不透明にしてから消す
@@ -119,6 +136,7 @@ func _ready() -> void:
 	goal.color = GOAL_COLOR
 	camera.make_current()
 	_build_terrain()
+	_build_lights()
 	_sync_shadow()
 	_follow_camera()
 	_update_hud()
@@ -197,7 +215,7 @@ func _collision_body(area: Rect2) -> StaticBody2D:
 	return body
 
 
-## 親の座標で area を占める地形の見た目
+## 親の座標で area を占める単色の見た目 (地形・光源・反転区間の帯)
 func _terrain_rect(area: Rect2, color: Color) -> ColorRect:
 	var rect: ColorRect = ColorRect.new()
 	rect.position = area.position
@@ -207,11 +225,50 @@ func _terrain_rect(area: Rect2, color: Color) -> ColorRect:
 	return rect
 
 
-## 同期中の影の位置と攻撃は主人公から導く (.claude/rules/shadow-position-derived-from-hero.md)
+## Stage.LIGHTS の光源ごとに、上の画面には光源 (柱と灯り) と反転区間を照らす光を、下の画面には反転区間で影が
+## 逆へ動く範囲 (光源から左へ、反転区間の幅に倍率を掛けた幅) の帯と左向きの矢印を置く (反転区間の予兆)。
+## 帯の幅で影の伸び縮みも前もって分かる。主人公は画面の中央にいるため、反転区間は入る半画面前から見える
+func _build_lights() -> void:
+	for light: Dictionary in Stage.LIGHTS:
+		var x: float = light["x"]
+		var lamp_y: float = Stage.GROUND_Y - light["height"]
+		var beam: Polygon2D = Polygon2D.new()
+		beam.polygon = PackedVector2Array(
+			[Vector2(x, lamp_y), Vector2(x, Stage.GROUND_Y), Vector2(x + light["zone"], Stage.GROUND_Y)]
+		)
+		beam.color = Color(LAMP_LIGHT_COLOR, LAMP_BEAM_ALPHA)
+		lights.add_child(beam)
+		lights.add_child(_terrain_rect(Rect2(x - 3.0, lamp_y, 6.0, light["height"]), LAMP_POST_COLOR))
+		lights.add_child(_terrain_rect(Rect2(x - 10.0, lamp_y - 12.0, 20.0, 14.0), LAMP_LIGHT_COLOR))
+		var band: Rect2 = shadow_reverse_range(light)
+		lights.add_child(_terrain_rect(band, REVERSE_ZONE_COLOR))
+		var arrow_y: float = band.get_center().y
+		var arrow_x: float = band.position.x + REVERSE_ARROW_SPACING / 2.0
+		while arrow_x < band.end.x:
+			var arrow: Polygon2D = Polygon2D.new()
+			arrow.polygon = PackedVector2Array(
+				[
+					Vector2(arrow_x - 10.0, arrow_y),
+					Vector2(arrow_x + 10.0, arrow_y - 12.0),
+					Vector2(arrow_x + 10.0, arrow_y + 12.0)
+				]
+			)
+			arrow.color = LAMP_LIGHT_COLOR
+			lights.add_child(arrow)
+			arrow_x += REVERSE_ARROW_SPACING
+
+
+## 影の位置・長さ・攻撃は主人公と、主人公がいる反転区間の光源から導く
+## (.claude/rules/shadow-position-derived-from-hero.md)
 func _sync_shadow() -> void:
 	shadow.position = shadow_position(hero.position)
+	var body: Rect2 = shadow_body_rect(hero.position)
+	shadow_body.position = body.position - shadow.position
+	shadow_body.size = body.size
+	var attack: Rect2 = shadow_attack_area(hero.position, hero.facing)
 	shadow_attack.visible = hero.attack_visual.visible
-	shadow_attack.position = hero.attack_visual.position
+	shadow_attack.position = attack.position - shadow.position
+	shadow_attack.size = attack.size
 
 
 func _follow_camera() -> void:
@@ -247,8 +304,10 @@ func _is_living(enemy: Variant) -> bool:
 func _resolve_attack_hits() -> void:
 	if not hero.is_attacking():
 		return
-	var top_area: Rect2 = Hero.attack_area(hero.position, hero.facing)
-	var areas: Array[Rect2] = [top_area, Rect2(shadow_position(top_area.position), top_area.size)]
+	var areas: Array[Rect2] = [
+		Hero.attack_area(hero.position, hero.facing, Hero.ATTACK_REACH),
+		shadow_attack_area(hero.position, hero.facing)
+	]
 	var hits: Array[Enemy] = []
 	for enemy: Enemy in _living_enemies():
 		if not swing_hits.has(enemy) and areas[enemy.lane].intersects(enemy.body_rect()):
@@ -283,9 +342,7 @@ func _resolve_attack_hits() -> void:
 
 ## 上の画面の敵が主人公に、下の画面の敵が影に触れていたら体力を減らす
 func _resolve_contact_damage() -> void:
-	var bodies: Array[Rect2] = [
-		hero.body_rect(), Rect2(shadow_position(hero.position), Hero.SIZE)
-	]
+	var bodies: Array[Rect2] = [hero.body_rect(), shadow_body_rect(hero.position)]
 	for enemy: Enemy in _living_enemies():
 		if bodies[enemy.lane].intersects(enemy.body_rect()):
 			game_state.take_damage(CONTACT_DAMAGE)
@@ -343,9 +400,42 @@ static func hint_text(hints: Array) -> String:
 	return "    ".join(parts)
 
 
-## 同期中の影の位置。主人公の位置から上の画面 1 つ分下
+## 体の左上が hero_position の主人公の影の位置 (伸び縮みさせる前の、主人公と同じ大きさの体の左上)。
+## 上の画面 1 つ分下で、横は主人公の体の中心を Light.shadow_center_x() で写した位置 (反転区間の外は主人公と同じ)
 static func shadow_position(hero_position: Vector2) -> Vector2:
-	return hero_position + Vector2(0.0, SCREEN_HEIGHT)
+	var half_width: float = Hero.SIZE.x / 2.0
+	return Vector2(
+		Light.shadow_center_x(hero_position.x + half_width, Stage.LIGHTS) - half_width,
+		hero_position.y + SCREEN_HEIGHT
+	)
+
+
+## 体の左上が hero_position の主人公の影の体の矩形。足元と横位置は shadow_position() の体と同じで、
+## 高さを光源の倍率で伸び縮みさせる (敵との接触もこの矩形で判定する)
+static func shadow_body_rect(hero_position: Vector2) -> Rect2:
+	var at: Vector2 = shadow_position(hero_position)
+	var height: float = (
+		Hero.SIZE.y * Light.shadow_scale_at(hero_position.x + Hero.SIZE.x / 2.0, Stage.LIGHTS)
+	)
+	return Rect2(at.x, at.y + Hero.SIZE.y - height, Hero.SIZE.x, height)
+
+
+## 体の左上が hero_position で hero_facing を向いている主人公の影の攻撃の範囲。反転区間では主人公と逆を向き、
+## リーチは光源の倍率で伸び縮みする。高さは主人公と同じ (足元から同じ高さに出て、地面に立つ敵に届く)
+static func shadow_attack_area(hero_position: Vector2, hero_facing: float) -> Rect2:
+	var center_x: float = hero_position.x + Hero.SIZE.x / 2.0
+	return Hero.attack_area(
+		shadow_position(hero_position),
+		hero_facing * Light.shadow_direction(center_x, Stage.LIGHTS),
+		Hero.ATTACK_REACH * Light.shadow_scale_at(center_x, Stage.LIGHTS)
+	)
+
+
+## light (Stage.LIGHTS の要素) の反転区間で、影の体の中心が逆へ動く範囲の下の画面の矩形 (地面より上)。
+## 光源の x から左へ、反転区間の幅に光源の倍率を掛けた幅
+static func shadow_reverse_range(light: Dictionary) -> Rect2:
+	var width: float = light["zone"] * Light.shadow_scale(light["height"])
+	return Rect2(light["x"] - width, SCREEN_HEIGHT, width, Stage.GROUND_Y)
 
 
 ## 主人公の中心が hero_center_x の時の横スクロール量。主人公を画面の中央に置き、ステージの外は映さない
