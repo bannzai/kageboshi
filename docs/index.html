@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kageboshi（影法師）｜主人公と影が上下の画面で動く横スクロールアクション</title>
+  <meta name="description" content="Kageboshi は、上の画面の主人公と下の画面の影が同じ動きをする横スクロールアクション。光源の向きや高さで影の動きがずれる。PC (Steam) 向けに開発中。">
+  <link rel="canonical" href="https://bannzai.github.io/kageboshi/">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Kageboshi">
+  <meta property="og:title" content="Kageboshi（影法師）｜主人公と影が上下の画面で動く横スクロールアクション">
+  <meta property="og:description" content="上の画面の主人公と、下の画面の影。同じ動きが基本で、光がずれを生む。PC (Steam) 向けに開発中。">
+  <meta property="og:url" content="https://bannzai.github.io/kageboshi/">
+  <meta property="og:image" content="https://bannzai.github.io/kageboshi/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:locale" content="ja_JP">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Kageboshi（影法師）">
+  <meta name="twitter:description" content="上の画面の主人公と、下の画面の影。同じ動きが基本で、光がずれを生む横スクロールアクション。">
+  <meta name="twitter:image" content="https://bannzai.github.io/kageboshi/og.png">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "VideoGame",
+    "name": "Kageboshi",
+    "alternateName": "影法師",
+    "description": "上の画面の主人公と下の画面の影が同じ動きをする横スクロールアクション。光源の向きや高さで影の動きがずれる。",
+    "genre": ["Action", "Side-scroller"],
+    "gamePlatform": "PC",
+    "operatingSystem": ["Windows", "macOS", "Linux"],
+    "inLanguage": "ja",
+    "url": "https://bannzai.github.io/kageboshi/",
+    "image": "https://bannzai.github.io/kageboshi/og.png",
+    "author": { "@type": "Person", "name": "bannzai" }
+  }
+  </script>
+  <style>
+    :root {
+      --sky: #c9d6e3;
+      --ground: #736654;
+      --night: #2a2d3a;
+      --deep: #1b1d26;
+      --hero: #e0823d;
+      --shade: #0d0e14;
+      --text-light: #e6e8ef;
+      --text-dark: #1b1d26;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+      line-height: 1.8;
+      color: var(--text-dark);
+      background: var(--sky);
+    }
+    a { color: inherit; }
+    a:focus-visible { outline: 3px solid var(--hero); outline-offset: 3px; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+    .hero-top { background: var(--sky); padding: 72px 0 0; }
+    .hero-top h1 { font-size: clamp(2.4rem, 8vw, 4.5rem); letter-spacing: 0.08em; margin: 0; line-height: 1.1; }
+    .hero-top .ruby { font-size: 1rem; letter-spacing: 0.3em; margin: 8px 0 0; }
+    .hero-top .lead { font-size: 1.2rem; margin: 24px 0 0; max-width: 34em; }
+    .stage { position: relative; height: 96px; margin-top: 32px; border-bottom: 24px solid var(--ground); }
+    .figure { position: absolute; bottom: 0; left: 62%; width: 36px; height: 72px; border-radius: 8px; }
+    .figure.hero { background: var(--hero); }
+    .divider { height: 6px; background: var(--shade); }
+    .hero-bottom { background: var(--night); color: var(--text-light); padding: 0 0 56px; }
+    .hero-bottom .stage { border-bottom-color: #1f2029; margin-top: 0; }
+    .figure.shadow { background: var(--shade); }
+    .hero-bottom .lead { font-size: 1.2rem; margin: 32px 0 0; max-width: 34em; }
+    .status { display: inline-block; margin-top: 24px; padding: 8px 16px; border: 2px solid var(--text-light); border-radius: 999px; font-weight: bold; }
+    section { padding: 56px 0; }
+    section h2 { font-size: 1.6rem; margin: 0 0 16px; }
+    .light { background: #eef2f6; }
+    .dark { background: var(--deep); color: var(--text-light); }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 24px; }
+    .card { background: #fff; border-radius: 12px; padding: 20px; }
+    .dark .card { background: var(--night); }
+    .card h3 { margin: 0 0 8px; font-size: 1.1rem; }
+    .card p { margin: 0; }
+    footer { background: var(--shade); color: var(--text-light); padding: 32px 0; font-size: 0.9rem; }
+    footer ul { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero-top">
+      <div class="wrap">
+        <h1>Kageboshi</h1>
+        <p class="ruby">影法師</p>
+        <p class="lead">上の画面に主人公、下の画面にその影。影は本体と同じ動きをする横スクロールアクション。</p>
+        <div class="stage" aria-hidden="true"><div class="figure hero"></div></div>
+      </div>
+    </div>
+    <div class="divider" aria-hidden="true"></div>
+    <div class="hero-bottom">
+      <div class="wrap">
+        <div class="stage" aria-hidden="true"><div class="figure shadow"></div></div>
+        <p class="lead">ただし、光が変わると影はずれる。上で避けた動きが、下では敵に飛び込む動きになる。</p>
+        <p class="status">PC (Steam) 向けに開発中</p>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="light">
+      <div class="wrap">
+        <h2>同期が基本、ずれは条件付き</h2>
+        <p>移動もジャンプも上下の画面でそろって動く。敵は上下どちらの画面にも現れ、どちらで当たってもダメージになる。そこに光と影の性質が、上下の動きをずらす瞬間を持ち込む。</p>
+        <div class="cards">
+          <div class="card">
+            <h3>光源の向きで反転する</h3>
+            <p>松明や街灯をまたぐと影の伸びる向きが変わり、下の影だけ左右の動きが逆になる。</p>
+          </div>
+          <div class="card">
+            <h3>光源の高さで伸び縮みする</h3>
+            <p>夕方の低い光では影が伸び、移動量や攻撃のリーチが大きくなる。真上の光では縮む。</p>
+          </div>
+          <div class="card">
+            <h3>影縫いで自分からずらす</h3>
+            <p>ゲージを使って影を地面に縫い止め、本体だけを動かす。同期はタダ、ずれにはコストがかかる。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="dark">
+      <div class="wrap">
+        <h2>そろえれば強い</h2>
+        <p>上下で同時に攻撃が当たると大ダメージになる。ずらせば避けやすく、そろえれば強い。ずれる区間は光の見た目や敵の予兆で前もって分かり、影を引き寄せればいつでも同期に戻れる。</p>
+      </div>
+    </section>
+
+    <section class="light" id="support">
+      <div class="wrap">
+        <h2>サポート・お問い合わせ</h2>
+        <p>不具合の報告やご質問は、メールでお送りください。</p>
+        <p><a href="mailto:bannzai.app@gmail.com">bannzai.app@gmail.com</a></p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <ul>
+        <li><a href="./Terms-ja">利用規約</a></li>
+        <li><a href="./PrivacyPolicy-ja">プライバシーポリシー</a></li>
+        <li><a href="./Terms-en">Terms of Use</a></li>
+        <li><a href="./PrivacyPolicy-en">Privacy Policy</a></li>
+      </ul>
+      <p>&copy; 2026 bannzai</p>
+    </div>
+  </footer>
+</body>
+</html>
