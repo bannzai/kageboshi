@@ -42,9 +42,10 @@ var spawned_count: int = 0
 ## ステージ開始からの経過時間 (秒)。同期ボーナスの判定の時刻に使う
 var elapsed: float = 0.0
 ## 今の攻撃ですでに当たった敵。1 回の攻撃で同じ敵に 2 度当てない
-var swing_hits: Array[Node2D] = []
-## 上の画面・下の画面で最後に攻撃が当たった時刻 (Combat.Lane の順。当たりが無ければ負)
-var last_hit_times: Array[float] = [-1.0, -1.0]
+var swing_hits: Array[Enemy] = []
+## 同期ボーナスの時間幅 (Combat.SYNC_WINDOW) の中で攻撃が当たった敵 ({"enemy", "lane", "time"})。
+## 上下の当たりが別のフレームで同期ボーナスが後から成立した時に、先に当たっていた敵へ不足分のダメージを与える
+var recent_hits: Array[Dictionary] = []
 ## 仕切り線の光を消していく途中の Tween。続けて同期ボーナスが出たら止めて光らせ直す
 var sync_flash_tween: Tween = null
 
@@ -115,20 +116,28 @@ func spawn_enemy(lane: Combat.Lane, x: float, floor_y: float, patrol: float) -> 
 	return enemy
 
 
-## Stage.TERRAIN の矩形ごとに、上の画面には当たり判定と見た目を、下の画面には見た目だけを置く
+## Stage.TERRAIN の矩形ごとに、上の画面には当たり判定と見た目を、下の画面には見た目だけを置く。
+## 天井 (Stage.CEILING) は当たり判定だけを置く
 func _build_terrain() -> void:
 	for rect: Rect2 in Stage.TERRAIN:
-		var body: StaticBody2D = StaticBody2D.new()
-		body.position = rect.position
-		var shape: RectangleShape2D = RectangleShape2D.new()
-		shape.size = rect.size
-		var collision: CollisionShape2D = CollisionShape2D.new()
-		collision.shape = shape
-		collision.position = rect.size / 2.0
-		body.add_child(collision)
+		var body: StaticBody2D = _collision_body(rect)
 		body.add_child(_terrain_rect(Rect2(Vector2.ZERO, rect.size), TOP_TERRAIN_COLOR))
 		top_terrain.add_child(body)
 		bottom_terrain.add_child(_terrain_rect(rect, BOTTOM_TERRAIN_COLOR))
+	add_child(_collision_body(Stage.CEILING))
+
+
+## area を占める当たり判定
+func _collision_body(area: Rect2) -> StaticBody2D:
+	var body: StaticBody2D = StaticBody2D.new()
+	body.position = area.position
+	var shape: RectangleShape2D = RectangleShape2D.new()
+	shape.size = area.size
+	var collision: CollisionShape2D = CollisionShape2D.new()
+	collision.shape = shape
+	collision.position = area.size / 2.0
+	body.add_child(collision)
+	return body
 
 
 ## 親の座標で area を占める地形の見た目
@@ -171,6 +180,11 @@ func _living_enemies() -> Array[Enemy]:
 	return living
 
 
+## enemy が倒れて消えておらず、消える途中でもないか。消えた (free 済みの) 敵も受け取るため型を付けない
+func _is_living(enemy: Variant) -> bool:
+	return is_instance_valid(enemy) and not enemy.is_queued_for_deletion()
+
+
 ## 主人公の攻撃は上の画面の敵に、影の攻撃は下の画面の敵に当たる。上下で同時に当たったら
 ## 同期ボーナスでダメージを倍にする
 func _resolve_attack_hits() -> void:
@@ -182,19 +196,32 @@ func _resolve_attack_hits() -> void:
 	for enemy: Enemy in _living_enemies():
 		if not swing_hits.has(enemy) and areas[enemy.lane].intersects(enemy.body_rect()):
 			hits.append(enemy)
-			swing_hits.append(enemy)
-			last_hit_times[enemy.lane] = elapsed
 	if hits.is_empty():
 		return
-	var sync: bool = Combat.is_sync_hit(
-		last_hit_times[Combat.Lane.TOP], last_hit_times[Combat.Lane.BOTTOM]
-	)
+	swing_hits.append_array(hits)
+	var kept: Array[Dictionary] = []
+	for hit: Dictionary in recent_hits:
+		if elapsed - hit["time"] <= Combat.SYNC_WINDOW:
+			kept.append(hit)
+	for enemy: Enemy in hits:
+		kept.append({"enemy": enemy, "lane": enemy.lane, "time": elapsed})
+	recent_hits = kept
+	var latest: Array[float] = [-1.0, -1.0]
+	for hit: Dictionary in recent_hits:
+		latest[hit["lane"]] = maxf(latest[hit["lane"]], hit["time"])
+	var sync: bool = Combat.is_sync_hit(latest[Combat.Lane.TOP], latest[Combat.Lane.BOTTOM])
 	for enemy: Enemy in hits:
 		if enemy.take_hit(Combat.hit_damage(sync)):
 			enemy.queue_free()
-	if sync:
-		last_hit_times = [-1.0, -1.0]
-		_show_sync_effect()
+	if not sync:
+		return
+	for hit: Dictionary in recent_hits:
+		if hit["time"] < elapsed and _is_living(hit["enemy"]):
+			var earlier: Enemy = hit["enemy"]
+			if earlier.take_hit(Combat.sync_extra_damage()):
+				earlier.queue_free()
+	recent_hits.clear()
+	_show_sync_effect()
 
 
 ## 上の画面の敵が主人公に、下の画面の敵が影に触れていたら体力を減らす

@@ -86,6 +86,25 @@ func _check_attack_and_sync(main: Node2D) -> void:
 		"同期: 同期ボーナスの演出が出る"
 	)
 
+	await _wait_physics_frames(60)
+	_check(
+		main.get_tree().get_nodes_in_group("sync_effect").is_empty(),
+		"同期: 同期ボーナスの演出は時間が経つと消える"
+	)
+	main.spawn_enemy(Combat.Lane.TOP, front_x, Stage.GROUND_Y, 0.0)
+	await _press_attack()
+	await _wait_physics_frames(2)
+	main.spawn_enemy(Combat.Lane.BOTTOM, front_x, Stage.GROUND_Y, 0.0)
+	await _wait_physics_frames(2)
+	_check(
+		_living_enemy_count(main) == 0,
+		"同期: 上下の当たりが時間幅の中で別のフレームでも、先に当たった敵を含めて 1 回で倒れる"
+	)
+	_check(
+		not main.get_tree().get_nodes_in_group("sync_effect").is_empty(),
+		"同期: 上下の当たりが別のフレームでも同期ボーナスの演出が出る"
+	)
+
 
 ## 下の画面の敵が影に触れても、上の画面の敵が主人公に触れても体力が減り、0 でゲームオーバーになる
 func _check_damage_and_game_over(main: Node2D, game_state: Node) -> void:
@@ -198,6 +217,35 @@ func _check_terrain_and_scroll(main: Node2D) -> void:
 	)
 	_check_synced(main, "スクロール後")
 	_check_terrain_mirrored(main)
+	await _check_ceiling(main)
+
+
+## 高い地形 (壁の上) から跳んでも主人公は上の画面の上端を越えず、影は下の画面からはみ出さない
+func _check_ceiling(main: Node2D) -> void:
+	var hero: Hero = main.get_node("Hero")
+	var shadow: Node2D = main.get_node("Shadow")
+	hero.position = Vector2(WALL.position.x + 10.0, WALL.position.y - Hero.SIZE.y)
+	hero.velocity = Vector2.ZERO
+	await _wait_physics_frames(3)
+	_check(hero.is_on_floor(), "天井: 壁の上に立つ")
+	var highest_hero: float = hero.position.y
+	var highest_shadow: float = shadow.position.y
+	Input.parse_input_event(_key_event(KEY_SPACE, true))
+	for _i: int in range(40):
+		await physics_frame
+		highest_hero = minf(highest_hero, hero.position.y)
+		highest_shadow = minf(highest_shadow, shadow.position.y)
+	Input.parse_input_event(_key_event(KEY_SPACE, false))
+	await physics_frame
+	_check(highest_hero < WALL.position.y - Hero.SIZE.y, "天井: 壁の上からジャンプする")
+	_check(
+		highest_hero > -POSITION_TOLERANCE,
+		"天井: 主人公が上の画面の上端を越えない (最も高い y = %.2f)" % highest_hero
+	)
+	_check(
+		highest_shadow > main.SCREEN_HEIGHT - POSITION_TOLERANCE,
+		"天井: 影が下の画面の上端を越えて上の画面に入らない"
+	)
 
 
 ## 影は主人公から上の画面 1 つ分だけ下にいて、画面上の位置も同じ横位置・上の画面 1 つ分下にある。

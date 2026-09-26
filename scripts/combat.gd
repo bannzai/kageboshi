@@ -24,3 +24,8 @@ static func is_sync_hit(top_hit_time: float, bottom_hit_time: float) -> bool:
 ## 同期ボーナスの有無 sync で決まる 1 回の当たりのダメージ
 static func hit_damage(sync: bool) -> int:
 	return BASE_DAMAGE * SYNC_MULTIPLIER if sync else BASE_DAMAGE
+
+
+## 同期ボーナスが後から成立した時に、先に通常のダメージで当たっていた敵へ足すダメージ
+static func sync_extra_damage() -> int:
+	return hit_damage(true) - hit_damage(false)

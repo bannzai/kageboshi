@@ -189,6 +189,11 @@ func _check_sync_hit() -> void:
 		COMBAT_SCRIPT.hit_damage(true) == COMBAT_SCRIPT.BASE_DAMAGE * COMBAT_SCRIPT.SYNC_MULTIPLIER,
 		"同期: ボーナスありは倍率を掛けたダメージ"
 	)
+	_check(
+		COMBAT_SCRIPT.hit_damage(false) + COMBAT_SCRIPT.sync_extra_damage()
+		== COMBAT_SCRIPT.hit_damage(true),
+		"同期: 先に通常のダメージで当たった敵も、足すダメージでボーナスありと同じダメージになる"
+	)
 
 
 func _check_input_map() -> void:
