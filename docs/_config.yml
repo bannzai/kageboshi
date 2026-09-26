@@ -1,0 +1,5 @@
+# GitHub Pages (Jekyll) の設定。利用規約・プライバシーポリシーの Markdown を HTML 化して
+# 拡張子なし URL (/Terms-ja) と .html の両方で配信するため .nojekyll は置かない
+title: Kageboshi
+description: 主人公と影が上下の画面で同期し、光源でずれる横スクロールアクション
+lang: ja
