@@ -76,13 +76,13 @@ func _tick_attack(delta: float) -> void:
 
 func _update_attack_visual() -> void:
 	attack_visual.visible = is_attacking()
-	attack_visual.position = attack_area(Vector2.ZERO, facing).position
+	attack_visual.position = attack_area(Vector2.ZERO, facing, ATTACK_REACH).position
 
 
-## 体の左上が at で facing を向いている時の攻撃の範囲
-static func attack_area(at: Vector2, facing_direction: float) -> Rect2:
-	var left: float = at.x + SIZE.x if facing_direction > 0.0 else at.x - ATTACK_REACH
-	return Rect2(left, at.y + ATTACK_TOP, ATTACK_REACH, ATTACK_HEIGHT)
+## 体の左上が at で facing を向いている時の、横幅 reach の攻撃の範囲 (主人公は ATTACK_REACH、影は光源の倍率を掛けた幅)
+static func attack_area(at: Vector2, facing_direction: float, reach: float) -> Rect2:
+	var left: float = at.x + SIZE.x if facing_direction > 0.0 else at.x - reach
+	return Rect2(left, at.y + ATTACK_TOP, reach, ATTACK_HEIGHT)
 
 
 ## 入力と接地状態から求めた delta 秒後の速度。横は入力で決まり、縦は接地中のジャンプで初速を与え、
