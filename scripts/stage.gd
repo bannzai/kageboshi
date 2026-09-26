@@ -1,6 +1,9 @@
 extends RefCounted
-## ステージの地形の定義。座標は上の画面 (主人公の世界) のもので、下の画面の地形はここから
-## 上の画面 1 つ分 (main.gd の SCREEN_HEIGHT) だけ下にずらして置く。
+## ステージの地形と敵の出現位置の定義。座標は上の画面 (主人公の世界) のもので、下の画面の地形と敵は
+## ここから上の画面 1 つ分 (main.gd の SCREEN_HEIGHT) だけ下にずらして置く。
+
+## 敵の出現先の画面 (Combat.Lane)
+const Combat := preload("res://scripts/combat.gd")
 
 ## ステージの横幅。カメラはこの範囲の外を映さない
 const WIDTH: float = 3200.0
@@ -17,3 +20,24 @@ const TERRAIN: Array[Rect2] = [
 	Rect2(1900.0, 272.0, 240.0, 48.0),
 	Rect2(WIDTH, 0.0, 40.0, 360.0),
 ]
+## 敵の出現位置。x の昇順に並べる。x は出現位置 (体の左端)、floor_y は足元の y 座標 (上の画面の座標)、
+## lane は出現する画面、patrol は x から左へ往復する幅。往復の範囲は地形の段差・壁と重ならないように置く
+const SPAWNS: Array[Dictionary] = [
+	{"x": 1760.0, "floor_y": GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 240.0},
+	{"x": 1860.0, "floor_y": GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 160.0},
+	{"x": 2500.0, "floor_y": GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 200.0},
+	{"x": 2500.0, "floor_y": GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 200.0},
+	{"x": 3000.0, "floor_y": GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 240.0},
+]
+## 画面の右端からこの距離だけ先の出現位置まで出現させる (画面に入る直前に置き、出現の瞬間を見せない)
+const SPAWN_AHEAD: float = 80.0
+
+
+## 画面の右端が view_right の時に出現済みであるべき敵の数 (SPAWNS の先頭からの個数)
+static func due_spawn_count(view_right: float) -> int:
+	var count: int = 0
+	for spawn: Dictionary in SPAWNS:
+		if spawn["x"] > view_right + SPAWN_AHEAD:
+			break
+		count += 1
+	return count

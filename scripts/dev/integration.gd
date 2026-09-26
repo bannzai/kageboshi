@@ -1,11 +1,16 @@
 extends SceneTree
-## キー入力 (InputMap を通る InputEventKey) でメインシーンの主人公を動かし、地形との当たり判定・スクロールと、
-## 下の画面の影が同じ動きをすることを検証する。実行方法は AGENTS.md を参照。失敗したら quit(1) で終わる。
+## キー入力 (InputMap を通る InputEventKey) でメインシーンの主人公を動かし、地形との当たり判定・スクロール、
+## 下の画面の影が同じ動き・同じ攻撃をすること、敵を倒す・ダメージを受ける・ゲームオーバー・同期ボーナスを
+## 検証する。実行方法は AGENTS.md を参照。失敗したら quit(1) で終わる。
 
-## 地形の定義 (段差・壁の位置の期待値に使う)
+## 地形の定義 (段差・壁・地面の位置の期待値に使う)
 const Stage := preload("res://scripts/stage.gd")
 ## 主人公のスクリプト (体の大きさ)
 const Hero := preload("res://scripts/hero.gd")
+## 敵のスクリプト (体力)
+const Enemy := preload("res://scripts/enemy.gd")
+## 攻撃の画面 (Lane) とダメージ
+const Combat := preload("res://scripts/combat.gd")
 ## 位置の比較で許す誤差 (px)。CharacterBody2D は地形から safe_margin (0.08 px) だけ離れて止まる
 const POSITION_TOLERANCE: float = 1.0
 ## 最初の段差 (Stage.TERRAIN の 3 番目)
@@ -26,18 +31,103 @@ func _initialize() -> void:
 func _run() -> void:
 	_check(Stage.TERRAIN.has(STEP), "前提: 段差が Stage.TERRAIN にある")
 	_check(Stage.TERRAIN.has(WALL), "前提: 壁が Stage.TERRAIN にある")
-	var main: Node2D = load("res://scenes/main.tscn").instantiate()
-	root.add_child(main)
-	await _wait_physics_frames(2)
-	await _check_move_and_jump(main)
-	await _check_terrain_and_scroll(main)
-	main.queue_free()
-	await process_frame
+	var game_state: Node = root.get_node_or_null("GameState")
+	_check(game_state != null, "前提: autoload の GameState が root にある")
+	if game_state != null:
+		var main: Node2D = await _start_main()
+		await _check_move_and_jump(main)
+		await _check_terrain_and_scroll(main)
+		main.queue_free()
+		main = await _start_main()
+		await _check_attack_and_sync(main)
+		await _check_damage_and_game_over(main, game_state)
+		main.queue_free()
+		await process_frame
 	if failed:
 		quit(1)
 	else:
 		print("integration OK")
 		quit(0)
+
+
+## メインシーンを新しく置き、主人公が地面に着くまで待つ (体力も GameState.reset() で最大値に戻る)
+func _start_main() -> Node2D:
+	var main: Node2D = load("res://scenes/main.tscn").instantiate()
+	root.add_child(main)
+	await _wait_physics_frames(2)
+	return main
+
+
+## 攻撃キーで目の前の敵に攻撃が当たり、通常の攻撃は体力の回数で、上下で同時に当てた攻撃は 1 回で倒す
+func _check_attack_and_sync(main: Node2D) -> void:
+	var hero: Hero = main.get_node("Hero")
+	var front_x: float = hero.position.x + Hero.SIZE.x + 10.0
+	var top_enemy: Node2D = main.spawn_enemy(Combat.Lane.TOP, front_x, Stage.GROUND_Y, 0.0)
+	await _press_attack()
+	_check(top_enemy.hp == Enemy.MAX_HP - Combat.BASE_DAMAGE, "攻撃: J キーで上の画面の目の前の敵に当たる")
+	for _i: int in range(Enemy.MAX_HP - 1):
+		await _wait_physics_frames(20)
+		await _press_attack()
+	_check(_living_enemy_count(main) == 0, "攻撃: 通常の攻撃を体力の回数だけ当てると敵が倒れる")
+	_check(
+		main.get_tree().get_nodes_in_group("sync_effect").is_empty(),
+		"同期: 上の画面だけに当てた時は同期ボーナスが出ない"
+	)
+
+	await _wait_physics_frames(20)
+	_check(not main.get_node("Shadow/Attack").visible, "攻撃: 攻撃が終われば影の攻撃も消える")
+	main.spawn_enemy(Combat.Lane.TOP, front_x, Stage.GROUND_Y, 0.0)
+	main.spawn_enemy(Combat.Lane.BOTTOM, front_x, Stage.GROUND_Y, 0.0)
+	await _press_attack()
+	_check(main.get_node("Shadow/Attack").visible, "攻撃: 同期中は影も同じ攻撃をする")
+	_check(_living_enemy_count(main) == 0, "同期: 上下で同時に当てた攻撃 1 回で上下の敵が倒れる")
+	_check(
+		not main.get_tree().get_nodes_in_group("sync_effect").is_empty(),
+		"同期: 同期ボーナスの演出が出る"
+	)
+
+
+## 下の画面の敵が影に触れても、上の画面の敵が主人公に触れても体力が減り、0 でゲームオーバーになる
+func _check_damage_and_game_over(main: Node2D, game_state: Node) -> void:
+	var hero: Hero = main.get_node("Hero")
+	await _wait_physics_frames(40)
+	var start_hp: int = game_state.hp
+	var bottom_enemy: Node2D = main.spawn_enemy(
+		Combat.Lane.BOTTOM, hero.position.x + 10.0, Stage.GROUND_Y, 0.0
+	)
+	await _wait_physics_frames(2)
+	_check(game_state.hp == start_hp - 1, "ダメージ: 下の画面の敵が影に触れると体力が減る")
+	bottom_enemy.queue_free()
+	await _wait_physics_frames(int(game_state.INVINCIBLE_TIME * 60.0) + 10)
+	_check(game_state.hp == start_hp - 1, "ダメージ: 敵が離れれば体力は減らない")
+
+	main.spawn_enemy(Combat.Lane.TOP, hero.position.x + 10.0, Stage.GROUND_Y, 0.0)
+	await _wait_physics_frames(2)
+	_check(game_state.hp == start_hp - 2, "ダメージ: 上の画面の敵が主人公に触れると体力が減る")
+
+	var frames_left: int = int(game_state.INVINCIBLE_TIME * 60.0) * (start_hp + 1)
+	while not game_state.is_game_over() and frames_left > 0:
+		await physics_frame
+		frames_left -= 1
+	_check(game_state.is_game_over() and game_state.hp == 0, "ゲームオーバー: 敵に触れ続けて体力が 0 になる")
+	_check(main.get_node("Overlay/GameOver").visible, "ゲームオーバー: ゲームオーバーの表示が出る")
+	var over_x: float = hero.position.x
+	await _hold_keys([KEY_RIGHT], 20)
+	_check(absf(hero.position.x - over_x) < POSITION_TOLERANCE, "ゲームオーバー: 操作を受け付けない")
+
+
+## 攻撃キーを 1 物理フレームだけ押して離す
+func _press_attack() -> void:
+	await _hold_keys([KEY_J], 1)
+
+
+## 倒れて消える途中のものを除いた敵の数
+func _living_enemy_count(main: Node2D) -> int:
+	var count: int = 0
+	for enemy: Node in main.get_node("Enemies").get_children():
+		if not enemy.is_queued_for_deletion():
+			count += 1
+	return count
 
 
 ## 平らな地面での左右移動とジャンプ

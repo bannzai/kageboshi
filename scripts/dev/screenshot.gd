@@ -3,6 +3,13 @@ extends SceneTree
 ## --headless なしで起動する)。撮影した PNG は tmp/screenshot-<名前>.png に保存し、失敗したら quit(1) で終わる。
 ## 画面や状態を増やす時は _capture_scenes() だけを差し替える。
 
+## 撮影するメインシーン
+const MAIN_SCENE: PackedScene = preload("res://scenes/main.tscn")
+## 敵の出現先の画面 (Lane)
+const Combat := preload("res://scripts/combat.gd")
+## 地面の位置
+const Stage := preload("res://scripts/stage.gd")
+
 
 ## tree の準備が終わってから _run() を始める (シーンの追加は _initialize() の後でないとできない)
 func _initialize() -> void:
@@ -15,10 +22,17 @@ func _run() -> void:
 		quit(0)
 
 
-## 撮影する画面の並び (起動直後 → 段差の手前でジャンプした瞬間 → 段差の上 → 右へスクロールして壁の手前)。
+## 撮影する画面の並び (起動直後 → 段差の手前でジャンプした瞬間 → 段差の上 → 右へスクロールして壁の手前 →
+## 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス → 敵に触れ続けたゲームオーバー)。
 ## 失敗した撮影は _capture() が quit(1) 済みなので、false を受けたらそのまま抜ける。
 func _capture_scenes() -> bool:
-	var main: Node2D = load("res://scenes/main.tscn").instantiate()
+	if not await _capture_terrain_and_scroll():
+		return false
+	return await _capture_combat()
+
+
+func _capture_terrain_and_scroll() -> bool:
+	var main: Node2D = MAIN_SCENE.instantiate()
 	root.add_child(main)
 	await create_timer(0.3).timeout
 	if not await _capture("tmp/screenshot-main.png"):
@@ -37,6 +51,34 @@ func _capture_scenes() -> bool:
 		return false
 	await _hold_keys([KEY_RIGHT], 200)
 	if not await _capture("tmp/screenshot-scroll.png"):
+		return false
+	main.queue_free()
+	await process_frame
+	return true
+
+
+func _capture_combat() -> bool:
+	var main: Node2D = MAIN_SCENE.instantiate()
+	root.add_child(main)
+	await create_timer(0.3).timeout
+	var front_x: float = main.get_node("Hero").position.x + 90.0
+	main.spawn_enemy(Combat.Lane.TOP, front_x, Stage.GROUND_Y, 0.0)
+	main.spawn_enemy(Combat.Lane.BOTTOM, front_x, Stage.GROUND_Y, 0.0)
+	if not await _capture("tmp/screenshot-enemies.png"):
+		return false
+	await _hold_keys([KEY_RIGHT], 7)
+	await _hold_keys([KEY_J], 1)
+	if not await _capture("tmp/screenshot-sync.png"):
+		return false
+	await create_timer(1.0).timeout
+	var game_state: Node = root.get_node("GameState")
+	main.spawn_enemy(Combat.Lane.BOTTOM, main.get_node("Hero").position.x, Stage.GROUND_Y, 0.0)
+	for _i: int in range(600):
+		if game_state.is_game_over():
+			break
+		await physics_frame
+	await create_timer(0.2).timeout
+	if not await _capture("tmp/screenshot-gameover.png"):
 		return false
 	main.queue_free()
 	await process_frame

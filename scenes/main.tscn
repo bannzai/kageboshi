@@ -30,6 +30,8 @@ color = Color(0.2, 0.22, 0.28, 1)
 [node name="BottomTerrain" type="Node2D" parent="."]
 position = Vector2(0, 360)
 
+[node name="Enemies" type="Node2D" parent="."]
+
 [node name="Hero" type="CharacterBody2D" parent="."]
 position = Vector2(200, 256)
 script = ExtResource("2_hero")
@@ -44,6 +46,15 @@ offset_bottom = 64.0
 mouse_filter = 2
 color = Color(0.88, 0.51, 0.24, 1)
 
+[node name="Attack" type="ColorRect" parent="Hero"]
+visible = false
+offset_left = 40.0
+offset_top = 16.0
+offset_right = 88.0
+offset_bottom = 48.0
+mouse_filter = 2
+color = Color(1, 0.93, 0.7, 0.85)
+
 [node name="Shadow" type="Node2D" parent="."]
 
 [node name="Body" type="ColorRect" parent="Shadow"]
@@ -51,6 +62,15 @@ offset_right = 40.0
 offset_bottom = 64.0
 mouse_filter = 2
 color = Color(0.04, 0.04, 0.06, 1)
+
+[node name="Attack" type="ColorRect" parent="Shadow"]
+visible = false
+offset_left = 40.0
+offset_top = 16.0
+offset_right = 88.0
+offset_bottom = 48.0
+mouse_filter = 2
+color = Color(0.5, 0.52, 0.62, 0.85)
 
 [node name="Camera" type="Camera2D" parent="."]
 anchor_mode = 0
@@ -64,3 +84,36 @@ offset_right = 1280.0
 offset_bottom = 362.0
 mouse_filter = 2
 color = Color(0.05, 0.05, 0.07, 1)
+
+[node name="SyncFlash" type="ColorRect" parent="Overlay"]
+modulate = Color(1, 1, 1, 0)
+offset_top = 354.0
+offset_right = 1280.0
+offset_bottom = 366.0
+mouse_filter = 2
+
+[node name="HpLabel" type="Label" parent="Overlay"]
+offset_left = 16.0
+offset_top = 8.0
+offset_right = 216.0
+offset_bottom = 40.0
+theme_override_colors/font_color = Color(0.1, 0.1, 0.12, 1)
+theme_override_font_sizes/font_size = 22
+text = "HP 5 / 5"
+
+[node name="GameOver" type="ColorRect" parent="Overlay"]
+visible = false
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 2
+color = Color(0, 0, 0, 0.55)
+
+[node name="Label" type="Label" parent="Overlay/GameOver"]
+offset_top = 320.0
+offset_right = 1280.0
+offset_bottom = 400.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 56
+text = "GAME OVER"
+horizontal_alignment = 1
+vertical_alignment = 1
