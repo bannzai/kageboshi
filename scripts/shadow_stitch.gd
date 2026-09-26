@@ -13,8 +13,6 @@ enum Pin {
 
 ## 主人公の体の大きさと移動の速さ
 const Hero := preload("res://scripts/hero.gd")
-## ステージの横幅
-const Stage := preload("res://scripts/stage.gd")
 
 ## 影が主人公から横に離れられる距離。主人公が画面の中央にいても影が画面の外に出ない幅にする
 const MAX_OFFSET: float = 560.0
@@ -47,23 +45,27 @@ static func next_pin(
 	return Pin.NONE
 
 
-## 同期中の影の位置が synced の時の、影が主人公から MAX_OFFSET より離れず、ステージの外に出ないずれ
-static func clamp_offset(offset: Vector2, synced: Vector2) -> Vector2:
+## 同期中の影の位置が synced の時の、影が主人公から MAX_OFFSET より離れず、横幅 stage_width のステージの外に
+## 出ないずれ
+static func clamp_offset(offset: Vector2, synced: Vector2, stage_width: float) -> Vector2:
 	var x: float = clampf(offset.x, -MAX_OFFSET, MAX_OFFSET)
-	x = clampf(x, -synced.x, Stage.WIDTH - Hero.SIZE.x - synced.x)
+	x = clampf(x, -synced.x, stage_width - Hero.SIZE.x - synced.x)
 	return Vector2(x, offset.y)
 
 
-## 影を pinned に縫い止めている間の、同期中の影の位置が synced の時のずれ
-static func pinned_offset(pinned: Vector2, synced: Vector2) -> Vector2:
-	return clamp_offset(pinned - synced, synced)
+## 横幅 stage_width のステージで影を pinned に縫い止めている間の、同期中の影の位置が synced の時のずれ
+static func pinned_offset(pinned: Vector2, synced: Vector2, stage_width: float) -> Vector2:
+	return clamp_offset(pinned - synced, synced, stage_width)
 
 
-## 主人公を止めて影だけを動かしている間の、direction (-1〜1) の左右入力で delta 秒後のずれ
+## 横幅 stage_width のステージで主人公を止めて影だけを動かしている間の、direction (-1〜1) の左右入力で
+## delta 秒後のずれ
 static func running_offset(
-	offset: Vector2, direction: float, synced: Vector2, delta: float
+	offset: Vector2, direction: float, synced: Vector2, delta: float, stage_width: float
 ) -> Vector2:
-	return clamp_offset(offset + Vector2(direction * Hero.MOVE_SPEED * delta, 0.0), synced)
+	return clamp_offset(
+		offset + Vector2(direction * Hero.MOVE_SPEED * delta, 0.0), synced, stage_width
+	)
 
 
 ## 縫い止めを解いた後に残すずれ。横のずれだけを残し、縦は主人公の高さに合わせ直す

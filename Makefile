@@ -41,8 +41,8 @@ check: import
 	! grep -i -e 'WARNING' -e 'ERROR' $(LOG_DIR)/check.log
 
 # 移動・スクロール・攻撃・敵・体力・同期ボーナス・光源による影の反転と倍率・影縫い・引き寄せの計算、入力割り当て、
-# 設定と進行の保存・読み込み、シーンのロード、BGM の繰り返しと BGM・効果音を鳴らすバス、全素材の assets/CREDITS.md への
-# 記録の検証 (headless)
+# 昼・夕方・夜のステージの置き方とステージの進行、設定と進行の保存・読み込み、シーンのロード、ステージごとの BGM の
+# 繰り返しと BGM・効果音を鳴らすバス、全素材の assets/CREDITS.md への記録の検証 (headless)
 selfcheck: import
 	"$(GODOT)" --headless $(ENGINE_LOG) --path . --script res://scripts/dev/selfcheck.gd > $(LOG_DIR)/selfcheck.log 2>&1; \
 	echo "exit=$$?" >> $(LOG_DIR)/selfcheck.log; \
@@ -52,8 +52,9 @@ selfcheck: import
 
 # キー入力でメインシーンを動かす入力統合テスト (headless)。主人公の移動・ジャンプ・地形との当たり判定・
 # スクロールと影の同期、攻撃・被弾・ゲームオーバー・同期ボーナス、タイトル・ポーズ・リトライ・ステージクリア・設定の
-# 画面の遷移、光源をまたいだ反転区間での影の反転と伸び縮み、影縫い・ゲージ切れ・引き寄せ、設定画面での音量・
-# キー割り当ての変更と保存、BGM がプレイ中だけ鳴ることと攻撃・ダメージ・同期ボーナス・影縫いの効果音を確認する
+# 画面の遷移、各ステージで最初の位置からゴールに着けることと次のステージへの進行、光源をまたいだ反転区間での
+# 影の反転と伸び縮み、影縫い・ゲージ切れ・引き寄せ、設定画面での音量・キー割り当ての変更と保存、BGM がプレイ中だけ
+# 鳴ることと攻撃・ダメージ・同期ボーナス・影縫いの効果音を確認する
 integration: import
 	"$(GODOT)" --headless $(ENGINE_LOG) --path . --script res://scripts/dev/integration.gd > $(LOG_DIR)/integration.log 2>&1; \
 	echo "exit=$$?" >> $(LOG_DIR)/integration.log; \

@@ -8,8 +8,8 @@ const BGM_DAY := preload("res://assets/audio/bgm_day.ogg")
 const BGM_EVENING := preload("res://assets/audio/bgm_evening.ogg")
 ## 夜のステージの BGM
 const BGM_NIGHT := preload("res://assets/audio/bgm_night.ogg")
-## ステージの ID (scripts/stage.gd の ID) → BGM
-const STAGE_BGM: Dictionary = {"stage1": BGM_DAY}
+## ステージの ID (scripts/stages.gd の各ステージの id) → BGM
+const STAGE_BGM: Dictionary = {"stage1": BGM_DAY, "stage2": BGM_EVENING, "stage3": BGM_NIGHT}
 
 
 ## stage_id のステージの BGM。素材の読み込み設定 (.import) はリポジトリに置かず Ogg Vorbis の繰り返しが既定で
