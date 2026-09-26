@@ -1,7 +1,8 @@
 extends SceneTree
 ## キー入力 (InputMap を通る InputEventKey) でメインシーンの主人公を動かし、地形との当たり判定・スクロール、
-## 下の画面の影が同じ動き・同じ攻撃をすること、敵を倒す・ダメージを受ける・ゲームオーバー・同期ボーナスを
-## 検証する。実行方法は AGENTS.md を参照。失敗したら quit(1) で終わる。
+## 下の画面の影が同じ動き・同じ攻撃をすること、影縫い・ゲージ切れ・引き寄せで上下がずれて同期に戻ること、
+## 敵を倒す・ダメージを受ける・ゲームオーバー・同期ボーナスを検証する。実行方法は AGENTS.md を参照。
+## 失敗したら quit(1) で終わる。
 
 ## 地形の定義 (段差・壁・地面の位置の期待値に使う)
 const Stage := preload("res://scripts/stage.gd")
@@ -37,6 +38,9 @@ func _run() -> void:
 		var main: Node2D = await _start_main()
 		await _check_move_and_jump(main)
 		await _check_terrain_and_scroll(main)
+		main.queue_free()
+		main = await _start_main()
+		await _check_stitch_and_pull(main, game_state)
 		main.queue_free()
 		main = await _start_main()
 		await _check_attack_and_sync(main)
@@ -133,6 +137,100 @@ func _check_damage_and_game_over(main: Node2D, game_state: Node) -> void:
 	var over_x: float = hero.position.x
 	await _hold_keys([KEY_RIGHT], 20)
 	_check(absf(hero.position.x - over_x) < POSITION_TOLERANCE, "ゲームオーバー: 操作を受け付けない")
+
+
+## K キーで影を縫い止めて主人公だけが動き、離してもずれたまま主人公と同じ動きをして、I キーの引き寄せで
+## 同期に戻る。L キーで主人公を止めて影だけが動き、その最中の引き寄せでも同期に戻る。縫い止め続けると
+## ゲージが切れて解除される
+func _check_stitch_and_pull(main: Node2D, game_state: Node) -> void:
+	var hero: Hero = main.get_node("Hero")
+	var shadow: Node2D = main.get_node("Shadow")
+	var shadow_needle: CanvasItem = main.get_node("Shadow/Needle")
+	var hero_needle: CanvasItem = main.get_node("Hero/Needle")
+	_check(game_state.gauge == game_state.MAX_GAUGE, "影縫い: 最初はゲージが満タン")
+
+	var shadow_start: Vector2 = shadow.position
+	var hero_start_x: float = hero.position.x
+	_press_keys([KEY_K, KEY_RIGHT], true)
+	await _wait_physics_frames(30)
+	_check(hero.position.x > hero_start_x + 100.0, "影縫い: K キーを押している間も主人公は右へ進む")
+	_check(
+		shadow.position.distance_to(shadow_start) < POSITION_TOLERANCE,
+		"影縫い: K キーを押している間は影が縫い止めた位置に残る"
+	)
+	_check(shadow_needle.visible, "影縫い: 縫い止めた影に針が刺さる")
+	_check(game_state.gauge < game_state.MAX_GAUGE, "影縫い: 縫い止めている間はゲージが減る")
+
+	_press_keys([KEY_K], false)
+	await physics_frame
+	var offset_x: float = shadow.position.x - hero.position.x
+	var gauge_left: float = game_state.gauge
+	var released_x: float = hero.position.x
+	await _wait_physics_frames(10)
+	_press_keys([KEY_RIGHT], false)
+	await physics_frame
+	_check(not shadow_needle.visible, "影縫い: K キーを離すと針が消える")
+	_check(offset_x < -100.0, "影縫い: K キーを離しても影は縫い止めた分だけずれたまま")
+	_check(hero.position.x > released_x, "影縫い: 離した後も主人公は右へ進む")
+	_check(
+		absf(shadow.position.x - hero.position.x - offset_x) < POSITION_TOLERANCE,
+		"影縫い: 離した後は、ずれたまま影が主人公と同じ動きをする"
+	)
+	_check(
+		absf(shadow.position.y - hero.position.y - main.SCREEN_HEIGHT) < POSITION_TOLERANCE,
+		"影縫い: 離した後の影は主人公と同じ高さに戻る"
+	)
+	_check(game_state.gauge == gauge_left, "影縫い: ずれている間はゲージが回復しない")
+
+	await _hold_keys([KEY_I], 1)
+	await _wait_physics_frames(40)
+	_check_synced(main, "引き寄せ後")
+	var gauge_synced: float = game_state.gauge
+	await _wait_physics_frames(10)
+	_check(game_state.gauge > gauge_synced, "引き寄せ: 同期に戻るとゲージが回復する")
+
+	var stopped_x: float = hero.position.x
+	_press_keys([KEY_L, KEY_RIGHT, KEY_SPACE], true)
+	await _wait_physics_frames(30)
+	_check(absf(hero.position.x - stopped_x) < POSITION_TOLERANCE, "逆の影縫い: L キーで主人公が止まる")
+	_check(hero.is_on_floor(), "逆の影縫い: 主人公を止めている間はジャンプもしない")
+	_check(shadow.position.x > stopped_x + 100.0, "逆の影縫い: 影だけが右へ進む")
+	_check(hero_needle.visible, "逆の影縫い: 止めた主人公に針が刺さる")
+	_press_keys([KEY_RIGHT, KEY_SPACE], false)
+	await _hold_keys([KEY_I], 1)
+	await _wait_physics_frames(40)
+	_check(not hero_needle.visible, "引き寄せ: 逆の影縫いの最中に引き寄せると縫い止めが解ける")
+	_check_synced(main, "逆の影縫いの最中の引き寄せ後 (L キーは押したまま)")
+	_press_keys([KEY_L], false)
+	await physics_frame
+
+	game_state.gauge = game_state.MAX_GAUGE
+	var drain_frames: int = int(game_state.MAX_GAUGE / game_state.GAUGE_DRAIN * 60.0)
+	_press_keys([KEY_K, KEY_RIGHT], true)
+	await _wait_physics_frames(20)
+	_press_keys([KEY_RIGHT], false)
+	await _wait_physics_frames(drain_frames)
+	_check(not game_state.has_gauge(), "ゲージ切れ: 縫い止め続けるとゲージが 0 になる")
+	_check(not shadow_needle.visible, "ゲージ切れ: K キーを押したままでも縫い止めが解除される")
+	var empty_offset_x: float = shadow.position.x - hero.position.x
+	var before_left_x: float = hero.position.x
+	await _hold_keys([KEY_LEFT], 10)
+	_check(hero.position.x < before_left_x, "ゲージ切れ: 主人公は左へ進む")
+	_check(
+		absf(shadow.position.x - hero.position.x - empty_offset_x) < POSITION_TOLERANCE,
+		"ゲージ切れ: 解除された影は、ずれたまま主人公と同じ動きをする"
+	)
+	_check(empty_offset_x < -50.0, "ゲージ切れ: 解除されてもずれは残る")
+	_press_keys([KEY_K], false)
+	await _hold_keys([KEY_I], 1)
+	await _wait_physics_frames(40)
+	_check_synced(main, "ゲージ切れの後の引き寄せ後")
+
+
+## physical_keycodes (Key の配列) のキーを押す (pressed = true) / 離す (false)
+func _press_keys(physical_keycodes: Array, pressed: bool) -> void:
+	for keycode: Key in physical_keycodes:
+		Input.parse_input_event(_key_event(keycode, pressed))
 
 
 ## 攻撃キーを 1 物理フレームだけ押して離す

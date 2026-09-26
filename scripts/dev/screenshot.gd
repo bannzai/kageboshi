@@ -23,10 +23,13 @@ func _run() -> void:
 
 
 ## 撮影する画面の並び (起動直後 → 段差の手前でジャンプした瞬間 → 段差の上 → 右へスクロールして壁の手前 →
+## 影を縫い止めて主人公だけが進んだ影縫い → 引き寄せの途中 → 主人公を止めて影だけが進んだ逆の影縫い →
 ## 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス → 敵に触れ続けたゲームオーバー)。
 ## 失敗した撮影は _capture() が quit(1) 済みなので、false を受けたらそのまま抜ける。
 func _capture_scenes() -> bool:
 	if not await _capture_terrain_and_scroll():
+		return false
+	if not await _capture_stitch():
 		return false
 	return await _capture_combat()
 
@@ -52,6 +55,34 @@ func _capture_terrain_and_scroll() -> bool:
 	await _hold_keys([KEY_RIGHT], 200)
 	if not await _capture("tmp/screenshot-scroll.png"):
 		return false
+	main.queue_free()
+	await process_frame
+	return true
+
+
+func _capture_stitch() -> bool:
+	var main: Node2D = MAIN_SCENE.instantiate()
+	root.add_child(main)
+	await create_timer(0.3).timeout
+	Input.parse_input_event(_key_event(KEY_K, true))
+	Input.parse_input_event(_key_event(KEY_RIGHT, true))
+	await _wait_physics_frames(40)
+	if not await _capture("tmp/screenshot-stitch.png"):
+		return false
+	Input.parse_input_event(_key_event(KEY_RIGHT, false))
+	Input.parse_input_event(_key_event(KEY_K, false))
+	await _hold_keys([KEY_I], 1)
+	await _wait_physics_frames(5)
+	if not await _capture("tmp/screenshot-pull.png"):
+		return false
+	await _wait_physics_frames(40)
+	Input.parse_input_event(_key_event(KEY_L, true))
+	Input.parse_input_event(_key_event(KEY_RIGHT, true))
+	await _wait_physics_frames(40)
+	if not await _capture("tmp/screenshot-stitch-hero.png"):
+		return false
+	Input.parse_input_event(_key_event(KEY_RIGHT, false))
+	Input.parse_input_event(_key_event(KEY_L, false))
 	main.queue_free()
 	await process_frame
 	return true
