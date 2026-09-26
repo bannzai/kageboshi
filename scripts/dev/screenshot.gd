@@ -7,10 +7,12 @@ extends SceneTree
 const MAIN_SCENE: PackedScene = preload("res://scenes/main.tscn")
 ## 敵の出現先の画面 (Lane)
 const Combat := preload("res://scripts/combat.gd")
-## 地面と光源の位置
+## 地面・光源・ゴールの位置
 const Stage := preload("res://scripts/stage.gd")
 ## 主人公のスクリプト (体の大きさ)
 const Hero := preload("res://scripts/hero.gd")
+## 画面 (Screen) の定義を持つ autoload の GameState のスクリプト
+const GameStateScript := preload("res://scripts/game_state.gd")
 
 
 ## tree の準備が終わってから _run() を始める (シーンの追加は _initialize() の後でないとできない)
@@ -24,11 +26,14 @@ func _run() -> void:
 		quit(0)
 
 
-## 撮影する画面の並び (起動直後 → 段差の手前でジャンプした瞬間 → 段差の上 → 右へスクロールして壁の手前 →
-## 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス → 敵に触れ続けたゲームオーバー →
+## 撮影する画面の並び (起動直後のタイトル → プレイ開始 → 段差の手前でジャンプした瞬間 → 段差の上 →
+## 右へスクロールして壁の手前 → ポーズ → 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス →
+## 敵に触れ続けたゲームオーバー → リトライしてゴールに入ったステージクリア →
 ## 光源の手前で見える反転区間の予兆 → 高い光源の反転区間で逆へ動いて縮んだ影の攻撃 → 低い光源の反転区間で伸びた影の攻撃)。
 ## 失敗した撮影は _capture() が quit(1) 済みなので、false を受けたらそのまま抜ける。
 func _capture_scenes() -> bool:
+	if not await _capture_title():
+		return false
 	if not await _capture_terrain_and_scroll():
 		return false
 	if not await _capture_combat():
@@ -36,12 +41,20 @@ func _capture_scenes() -> bool:
 	return await _capture_lights()
 
 
-func _capture_terrain_and_scroll() -> bool:
-	var main: Node2D = MAIN_SCENE.instantiate()
-	root.add_child(main)
+## メインシーンを置いてタイトルを撮り、Enter キーでプレイを始めた直後を撮る
+func _capture_title() -> bool:
+	_add_main()
 	await create_timer(0.3).timeout
-	if not await _capture("tmp/screenshot-main.png"):
+	if not await _capture("tmp/screenshot-title.png"):
 		return false
+	await _hold_keys([KEY_ENTER], 1)
+	await create_timer(0.2).timeout
+	return await _capture("tmp/screenshot-main.png")
+
+
+## _capture_title() でプレイを始めたメインシーンで撮る
+func _capture_terrain_and_scroll() -> bool:
+	var main: Node = current_scene
 	await _hold_keys([KEY_RIGHT], 70)
 	Input.parse_input_event(_key_event(KEY_RIGHT, true))
 	Input.parse_input_event(_key_event(KEY_SPACE, true))
@@ -57,14 +70,19 @@ func _capture_terrain_and_scroll() -> bool:
 	await _hold_keys([KEY_RIGHT], 200)
 	if not await _capture("tmp/screenshot-scroll.png"):
 		return false
+	await _hold_keys([KEY_ESCAPE], 1)
+	if not await _capture("tmp/screenshot-pause.png"):
+		return false
+	await _hold_keys([KEY_ESCAPE], 1)
 	main.queue_free()
 	await process_frame
 	return true
 
 
+## プレイ中のまま新しいメインシーンを置く (GameState の画面は前のシーンから引き継ぐ)
 func _capture_combat() -> bool:
-	var main: Node2D = MAIN_SCENE.instantiate()
-	root.add_child(main)
+	_add_main()
+	var main: Node = current_scene
 	await create_timer(0.3).timeout
 	var front_x: float = main.get_node("Hero").position.x + 90.0
 	main.spawn_enemy(Combat.Lane.TOP, front_x, Stage.GROUND_Y, 0.0)
@@ -85,15 +103,36 @@ func _capture_combat() -> bool:
 	await create_timer(0.2).timeout
 	if not await _capture("tmp/screenshot-gameover.png"):
 		return false
-	main.queue_free()
+	await _hold_keys([KEY_ENTER], 1)
+	await process_frame
+	await _wait_physics_frames(2)
+	var retried: Node2D = current_scene
+	retried.get_node("Hero").position.x = Stage.GOAL.position.x - 50.0
+	Input.parse_input_event(_key_event(KEY_RIGHT, true))
+	for _i: int in range(60):
+		if game_state.screen == GameStateScript.Screen.CLEAR:
+			break
+		await physics_frame
+	Input.parse_input_event(_key_event(KEY_RIGHT, false))
+	await create_timer(0.2).timeout
+	if not await _capture("tmp/screenshot-clear.png"):
+		return false
+	retried.queue_free()
 	await process_frame
 	return true
 
 
+## ステージクリアの画面のまま新しいメインシーンを置き、Enter キーでタイトルに戻してからもう一度 Enter キーで
+## プレイを始め、読み込み直されたメインシーンで光源の予兆と反転区間の影を撮る
 func _capture_lights() -> bool:
-	var main: Node2D = MAIN_SCENE.instantiate()
-	root.add_child(main)
+	_add_main()
 	await create_timer(0.3).timeout
+	await _hold_keys([KEY_ENTER], 1)
+	await process_frame
+	await _wait_physics_frames(2)
+	await _hold_keys([KEY_ENTER], 1)
+	await _wait_physics_frames(2)
+	var main: Node2D = current_scene
 	var high: Dictionary = Stage.LIGHTS[0]
 	await _place_hero(main, high["x"] - 130.0)
 	if not await _capture("tmp/screenshot-light-omen.png"):
@@ -133,6 +172,13 @@ func _place_hero(main: Node2D, center_x: float) -> void:
 	for enemy: Node in main.get_node("Enemies").get_children():
 		enemy.queue_free()
 	await _wait_physics_frames(1)
+
+
+## メインシーンを置き、画面の遷移で読み込み直せるよう current_scene にする
+func _add_main() -> void:
+	var main: Node2D = MAIN_SCENE.instantiate()
+	root.add_child(main)
+	current_scene = main
 
 
 ## 描画が反映されるまで 2 フレーム待ってから viewport を path に PNG で保存する。失敗したら quit(1) する

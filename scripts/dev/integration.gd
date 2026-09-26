@@ -1,8 +1,9 @@
 extends SceneTree
 ## キー入力 (InputMap を通る InputEventKey) でメインシーンの主人公を動かし、地形との当たり判定・スクロール、
-## 下の画面の影が同じ動き・同じ攻撃をすること、敵を倒す・ダメージを受ける・ゲームオーバー・同期ボーナス、
-## 光源をまたいだ反転区間で影の左右の動きと攻撃の向きが逆になり、光源の高さで伸び縮みすることを検証する。
-## 実行方法は AGENTS.md を参照。失敗したら quit(1) で終わる。
+## 下の画面の影が同じ動き・同じ攻撃をすること、敵を倒す・ダメージを受ける・ゲームオーバー・同期ボーナスと、
+## タイトル・ポーズ・ゲームオーバー・ステージクリアの画面の遷移、光源をまたいだ反転区間で影の左右の動きと
+## 攻撃の向きが逆になり、光源の高さで伸び縮みすることを検証する。実行方法は AGENTS.md を参照。
+## 失敗したら quit(1) で終わる。
 
 ## 地形・光源の定義 (段差・壁・地面・光源の位置の期待値に使う)
 const Stage := preload("res://scripts/stage.gd")
@@ -14,6 +15,8 @@ const Hero := preload("res://scripts/hero.gd")
 const Enemy := preload("res://scripts/enemy.gd")
 ## 攻撃の画面 (Lane) とダメージ
 const Combat := preload("res://scripts/combat.gd")
+## 画面 (Screen) の定義を持つ autoload の GameState のスクリプト
+const GameStateScript := preload("res://scripts/game_state.gd")
 ## 位置の比較で許す誤差 (px)。CharacterBody2D は地形から safe_margin (0.08 px) だけ離れて止まる
 const POSITION_TOLERANCE: float = 1.0
 ## 最初の段差 (Stage.TERRAIN の 3 番目)
@@ -26,6 +29,8 @@ const MOVE_FRAME_LIMIT: int = 180
 
 ## 検証が 1 件でも失敗したか。true なら exit code 1 で終わる
 var failed: bool = false
+## シーンを置いた時の主人公の位置 (scenes/main.tscn の Hero)。ステージを作り直した後の位置の期待値に使う
+var hero_start: Vector2 = Vector2.ZERO
 
 
 ## tree の準備が終わってから _run() を始める (シーンの追加は _initialize() の後でないとできない)
@@ -34,26 +39,14 @@ func _initialize() -> void:
 
 
 ## 物理フレームを進めながら入力を流すため、同じ実行中に重ねて呼び出さない。
+## 画面の遷移でステージを作り直すとメインシーンが読み込み直されるため、遷移の後は返ってきたシーンを使う
 func _run() -> void:
 	_check(Stage.TERRAIN.has(STEP), "前提: 段差が Stage.TERRAIN にある")
 	_check(Stage.TERRAIN.has(WALL), "前提: 壁が Stage.TERRAIN にある")
 	var game_state: Node = root.get_node_or_null("GameState")
 	_check(game_state != null, "前提: autoload の GameState が root にある")
 	if game_state != null:
-		var main: Node2D = await _start_main()
-		await _check_move_and_jump(main)
-		await _check_terrain_and_scroll(main)
-		main.queue_free()
-		main = await _start_main()
-		await _check_attack_and_sync(main)
-		await _check_damage_and_game_over(main, game_state)
-		main.queue_free()
-		main = await _start_main()
-		_check_light_omen(main)
-		for light: Dictionary in Stage.LIGHTS:
-			await _check_light_reversal(main, light)
-		main.queue_free()
-		await process_frame
+		await _run_scenes(game_state)
 	if failed:
 		quit(1)
 	else:
@@ -61,11 +54,146 @@ func _run() -> void:
 		quit(0)
 
 
-## メインシーンを新しく置き、主人公が地面に着くまで待つ (体力も GameState.reset() で最大値に戻る)
-func _start_main() -> Node2D:
+## メインシーンを置いて各検証を順に行う。読み込み直したメインシーンが無ければ (失敗として記録済み) そこでやめる
+func _run_scenes(game_state: Node) -> void:
+	var main: Node2D = await _start_main(game_state)
+	await _check_move_and_jump(main)
+	await _check_terrain_and_scroll(main)
+	await _check_pause(main, game_state)
+	main = await _check_quit_to_title(main, game_state)
+	if main == null:
+		return
+	await _check_attack_and_sync(main)
+	await _check_damage_and_game_over(main, game_state)
+	main = await _check_retry(main, game_state)
+	if main == null:
+		return
+	main = await _check_clear(main, game_state)
+	if main == null:
+		return
+	await _play_from_title(main, game_state, "クリア後にタイトルから始める")
+	_check_light_omen(main)
+	for light: Dictionary in Stage.LIGHTS:
+		await _check_light_reversal(main, light)
+	main.queue_free()
+	await process_frame
+
+
+## メインシーンを置いてタイトルの画面から Enter キーでプレイを始める。画面の遷移で読み込み直せるよう
+## current_scene にする
+func _start_main(game_state: Node) -> Node2D:
 	var main: Node2D = load("res://scenes/main.tscn").instantiate()
 	root.add_child(main)
+	current_scene = main
+	hero_start = main.get_node("Hero").position
 	await _wait_physics_frames(2)
+	await _play_from_title(main, game_state, "起動直後")
+	return main
+
+
+## タイトルの画面が出ていて移動キーでは主人公が動かず、Enter キーでプレイが始まって主人公が地面に着く
+func _play_from_title(main: Node2D, game_state: Node, label: String) -> void:
+	var hero: Hero = main.get_node("Hero")
+	_check(game_state.screen == GameStateScript.Screen.TITLE, "%s: タイトルの画面になる" % label)
+	_check(main.get_node("Screens/Title").visible, "%s: タイトルが表示される" % label)
+	_check(not main.get_node("Overlay/HpLabel").visible, "%s: タイトルでは体力を表示しない" % label)
+	await _hold_keys([KEY_RIGHT, KEY_SPACE], 10)
+	_check(hero.position == hero_start, "%s: タイトルでは移動・ジャンプのキーで主人公が動かない" % label)
+	await _hold_keys([KEY_ENTER], 1)
+	_check(game_state.is_playing(), "%s: Enter キーでプレイが始まる" % label)
+	_check(not main.get_node("Screens/Title").visible, "%s: プレイが始まるとタイトルが消える" % label)
+	_check(main.get_node("Overlay/HpLabel").visible, "%s: プレイ中は体力を表示する" % label)
+	await _wait_physics_frames(2)
+
+
+## Esc キーでポーズすると主人公も敵も止まり、もう一度 Esc キーで続きから動く
+func _check_pause(main: Node2D, game_state: Node) -> void:
+	var hero: Hero = main.get_node("Hero")
+	var enemy: Node2D = main.spawn_enemy(
+		Combat.Lane.TOP, hero.position.x + 300.0, Stage.GROUND_Y, 200.0
+	)
+	await _wait_physics_frames(2)
+	await _hold_keys([KEY_ESCAPE], 1)
+	_check(game_state.screen == GameStateScript.Screen.PAUSED, "ポーズ: Esc キーでポーズの画面になる")
+	_check(main.get_node("Screens/Pause").visible, "ポーズ: ポーズの表示が出る")
+	var hero_at: Vector2 = hero.position
+	var enemy_at: Vector2 = enemy.position
+	await _hold_keys([KEY_LEFT, KEY_J], 20)
+	_check(hero.position == hero_at, "ポーズ: 移動キーを押しても主人公が動かない")
+	_check(not hero.is_attacking(), "ポーズ: 攻撃キーを押しても攻撃しない")
+	_check(enemy.position == enemy_at, "ポーズ: 敵も止まる")
+	await _hold_keys([KEY_ESCAPE], 1)
+	_check(game_state.is_playing(), "ポーズ: もう一度 Esc キーでプレイ中に戻る")
+	_check(not main.get_node("Screens/Pause").visible, "ポーズ: 再開するとポーズの表示が消える")
+	await _hold_keys([KEY_LEFT], 10)
+	_check(hero.position.x < hero_at.x, "ポーズ: 再開すると続きから動く")
+	_check(enemy.position != enemy_at, "ポーズ: 再開すると敵も動く")
+
+
+## ポーズから Q キーでタイトルに戻ると、ステージが最初から作り直される。そこから Enter キーでまた遊べる
+func _check_quit_to_title(main: Node2D, game_state: Node) -> Node2D:
+	await _hold_keys([KEY_ESCAPE], 1)
+	await _hold_keys([KEY_Q], 1)
+	var restarted: Node2D = await _reloaded_main(main, "タイトルへ戻る")
+	if restarted == null:
+		return null
+	_check(restarted.scroll_x == 0.0, "タイトルへ戻る: スクロールが最初に戻る")
+	_check(_living_enemy_count(restarted) == 0, "タイトルへ戻る: 出現していた敵がいなくなる")
+	await _play_from_title(restarted, game_state, "タイトルへ戻った後")
+	return restarted
+
+
+## ゲームオーバーから Enter キーでやり直すと、体力が戻ったステージの最初からプレイが始まる
+func _check_retry(main: Node2D, game_state: Node) -> Node2D:
+	await _hold_keys([KEY_ENTER], 1)
+	var restarted: Node2D = await _reloaded_main(main, "リトライ")
+	if restarted == null:
+		return null
+	_check(game_state.is_playing(), "リトライ: タイトルを経ずにプレイ中になる")
+	_check(game_state.hp == game_state.MAX_HP, "リトライ: 体力が最大値に戻る")
+	_check(not restarted.get_node("Screens/GameOver").visible, "リトライ: ゲームオーバーの表示が消える")
+	_check(_living_enemy_count(restarted) == 0, "リトライ: 敵がいなくなる")
+	var hero: Hero = restarted.get_node("Hero")
+	await _hold_keys([KEY_RIGHT], 10)
+	_check(hero.position.x > hero_start.x, "リトライ: 右キーで主人公が動く")
+	return restarted
+
+
+## ゴールに入るとステージクリアの画面になって操作を受け付けず、Enter キーでタイトルに戻る
+func _check_clear(main: Node2D, game_state: Node) -> Node2D:
+	var hero: Hero = main.get_node("Hero")
+	hero.position = Vector2(
+		Stage.GOAL.position.x - Hero.SIZE.x - 20.0, Stage.GROUND_Y - Hero.SIZE.y
+	)
+	hero.velocity = Vector2.ZERO
+	await _wait_physics_frames(2)
+	_check(game_state.is_playing(), "クリア: ゴールの手前ではクリアにならない")
+	await _hold_keys([KEY_RIGHT], 20)
+	_check(game_state.screen == GameStateScript.Screen.CLEAR, "クリア: ゴールに入るとステージクリアになる")
+	_check(main.get_node("Screens/Clear").visible, "クリア: ステージクリアの表示が出る")
+	var cleared_at: Vector2 = hero.position
+	await _hold_keys([KEY_LEFT], 10)
+	_check(hero.position == cleared_at, "クリア: ステージクリアの後は操作を受け付けない")
+	await _hold_keys([KEY_ENTER], 1)
+	var restarted: Node2D = await _reloaded_main(main, "クリア後")
+	if restarted == null:
+		return null
+	_check(game_state.screen == GameStateScript.Screen.TITLE, "クリア後: Enter キーでタイトルに戻る")
+	_check(restarted.get_node("Screens/Title").visible, "クリア後: タイトルが表示される")
+	return restarted
+
+
+## 画面の遷移でステージを作り直した後の、読み込み直されたメインシーン。主人公は最初の位置にいる。
+## 遷移前のメインシーン old_main は呼び出しの時点で解放済みのことがあるため型を付けない
+func _reloaded_main(old_main: Variant, label: String) -> Node2D:
+	await process_frame
+	await _wait_physics_frames(2)
+	_check(not is_instance_valid(old_main), "%s: 遷移前のステージが消える" % label)
+	var main: Node2D = current_scene
+	_check(main != null, "%s: メインシーンが読み込み直される" % label)
+	if main == null:
+		return null
+	_check(main.get_node("Hero").position == hero_start, "%s: 主人公が最初の位置に戻る" % label)
 	return main
 
 
@@ -140,7 +268,7 @@ func _check_damage_and_game_over(main: Node2D, game_state: Node) -> void:
 		await physics_frame
 		frames_left -= 1
 	_check(game_state.is_game_over() and game_state.hp == 0, "ゲームオーバー: 敵に触れ続けて体力が 0 になる")
-	_check(main.get_node("Overlay/GameOver").visible, "ゲームオーバー: ゲームオーバーの表示が出る")
+	_check(main.get_node("Screens/GameOver").visible, "ゲームオーバー: ゲームオーバーの表示が出る")
 	var over_x: float = hero.position.x
 	await _hold_keys([KEY_RIGHT], 20)
 	_check(absf(hero.position.x - over_x) < POSITION_TOLERANCE, "ゲームオーバー: 操作を受け付けない")

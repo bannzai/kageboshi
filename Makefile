@@ -49,7 +49,8 @@ selfcheck: import
 	! grep -i -e 'WARNING' -e 'ERROR' $(LOG_DIR)/selfcheck.log
 
 # キー入力でメインシーンを動かす入力統合テスト (headless)。主人公の移動・ジャンプ・地形との当たり判定・
-# スクロールと影の同期、攻撃・被弾・ゲームオーバー・同期ボーナス、光源をまたいだ反転区間での影の反転と伸び縮みを確認する
+# スクロールと影の同期、攻撃・被弾・ゲームオーバー・同期ボーナス、タイトル・ポーズ・リトライ・ステージクリアの
+# 画面の遷移、光源をまたいだ反転区間での影の反転と伸び縮みを確認する
 integration: import
 	"$(GODOT)" --headless $(ENGINE_LOG) --path . --script res://scripts/dev/integration.gd > $(LOG_DIR)/integration.log 2>&1; \
 	echo "exit=$$?" >> $(LOG_DIR)/integration.log; \
