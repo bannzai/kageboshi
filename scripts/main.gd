@@ -11,6 +11,9 @@ const Hero := preload("res://scripts/hero.gd")
 const Enemy := preload("res://scripts/enemy.gd")
 ## 攻撃の当たりと同期ボーナスの計算
 const Combat := preload("res://scripts/combat.gd")
+## autoload の GameState のスクリプト。autoload 名の識別子で参照すると、--script で起動する
+## scripts/dev/ の検証が autoload の登録前に main.gd をコンパイルして失敗するため、ノードとして取る
+const GameStateScript := preload("res://scripts/game_state.gd")
 ## 敵のシーン
 const ENEMY_SCENE: PackedScene = preload("res://scenes/enemy.tscn")
 
@@ -45,6 +48,8 @@ var last_hit_times: Array[float] = [-1.0, -1.0]
 ## 仕切り線の光を消していく途中の Tween。続けて同期ボーナスが出たら止めて光らせ直す
 var sync_flash_tween: Tween = null
 
+## 主人公と影で共有する体力 (autoload の GameState)
+@onready var game_state: GameStateScript = get_node("/root/GameState")
 ## 上の画面の主人公
 @onready var hero: Hero = $Hero
 ## 下の画面の影。位置は _sync_shadow() で主人公から導く
@@ -69,7 +74,7 @@ var sync_flash_tween: Tween = null
 
 func _ready() -> void:
 	print("kageboshi boot")
-	GameState.reset()
+	game_state.reset()
 	sync_flash.color = SYNC_COLOR
 	camera.make_current()
 	_build_terrain()
@@ -80,8 +85,8 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	elapsed += delta
-	GameState.tick(delta)
-	var playing: bool = not GameState.is_game_over()
+	game_state.tick(delta)
+	var playing: bool = not game_state.is_game_over()
 	if playing and Input.is_action_just_pressed("attack") and hero.start_attack():
 		swing_hits.clear()
 	hero.physics_step(
@@ -199,7 +204,7 @@ func _resolve_contact_damage() -> void:
 	]
 	for enemy: Enemy in _living_enemies():
 		if bodies[enemy.lane].intersects(enemy.body_rect()):
-			GameState.take_damage(CONTACT_DAMAGE)
+			game_state.take_damage(CONTACT_DAMAGE)
 
 
 ## 同期ボーナスが出たことを、仕切り線の光と主人公・影の間の文字で知らせる
@@ -227,9 +232,9 @@ func _show_sync_effect() -> void:
 
 ## 体力・ゲームオーバーの表示と、無敵の間の主人公・影の半透明を GameState に合わせる
 func _update_hud() -> void:
-	hp_label.text = "HP %d / %d" % [GameState.hp, GameState.MAX_HP]
-	game_over_panel.visible = GameState.is_game_over()
-	var alpha: float = INVINCIBLE_ALPHA if GameState.is_invincible() else 1.0
+	hp_label.text = "HP %d / %d" % [game_state.hp, game_state.MAX_HP]
+	game_over_panel.visible = game_state.is_game_over()
+	var alpha: float = INVINCIBLE_ALPHA if game_state.is_invincible() else 1.0
 	hero.modulate.a = alpha
 	shadow.modulate.a = alpha
 
