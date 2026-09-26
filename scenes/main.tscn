@@ -30,6 +30,9 @@ color = Color(0.2, 0.22, 0.28, 1)
 [node name="BottomTerrain" type="Node2D" parent="."]
 position = Vector2(0, 360)
 
+[node name="Goal" type="ColorRect" parent="."]
+mouse_filter = 2
+
 [node name="Enemies" type="Node2D" parent="."]
 
 [node name="Hero" type="CharacterBody2D" parent="."]
@@ -101,19 +104,118 @@ theme_override_colors/font_color = Color(0.1, 0.1, 0.12, 1)
 theme_override_font_sizes/font_size = 22
 text = "HP 5 / 5"
 
-[node name="GameOver" type="ColorRect" parent="Overlay"]
+[node name="Screens" type="CanvasLayer" parent="."]
+layer = 2
+
+[node name="Title" type="ColorRect" parent="Screens"]
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 2
+color = Color(0, 0, 0, 0.3)
+
+[node name="Label" type="Label" parent="Screens/Title"]
+offset_top = 240.0
+offset_right = 1280.0
+offset_bottom = 340.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0.05, 0.05, 0.07, 1)
+theme_override_constants/outline_size = 12
+theme_override_font_sizes/font_size = 80
+text = "KAGEBOSHI"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Hint" type="Label" parent="Screens/Title"]
+offset_top = 380.0
+offset_right = 1280.0
+offset_bottom = 430.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0.05, 0.05, 0.07, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 28
+text = "Enter: Start"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Pause" type="ColorRect" parent="Screens"]
+visible = false
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 2
+color = Color(0, 0, 0, 0.45)
+
+[node name="Label" type="Label" parent="Screens/Pause"]
+offset_top = 280.0
+offset_right = 1280.0
+offset_bottom = 360.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 56
+text = "PAUSED"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Hint" type="Label" parent="Screens/Pause"]
+offset_top = 380.0
+offset_right = 1280.0
+offset_bottom = 430.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 28
+text = "Esc: Resume    Q: Title"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="GameOver" type="ColorRect" parent="Screens"]
 visible = false
 offset_right = 1280.0
 offset_bottom = 720.0
 mouse_filter = 2
 color = Color(0, 0, 0, 0.55)
 
-[node name="Label" type="Label" parent="Overlay/GameOver"]
-offset_top = 320.0
+[node name="Label" type="Label" parent="Screens/GameOver"]
+offset_top = 280.0
 offset_right = 1280.0
-offset_bottom = 400.0
+offset_bottom = 360.0
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_font_sizes/font_size = 56
 text = "GAME OVER"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Hint" type="Label" parent="Screens/GameOver"]
+offset_top = 380.0
+offset_right = 1280.0
+offset_bottom = 430.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 28
+text = "Enter: Retry    Q: Title"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Clear" type="ColorRect" parent="Screens"]
+visible = false
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 2
+color = Color(0, 0, 0, 0.35)
+
+[node name="Label" type="Label" parent="Screens/Clear"]
+offset_top = 280.0
+offset_right = 1280.0
+offset_bottom = 360.0
+theme_override_colors/font_color = Color(1, 0.82, 0.25, 1)
+theme_override_colors/font_outline_color = Color(0.05, 0.05, 0.07, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 56
+text = "STAGE CLEAR"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Hint" type="Label" parent="Screens/Clear"]
+offset_top = 380.0
+offset_right = 1280.0
+offset_bottom = 430.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 28
+text = "Enter: Title"
 horizontal_alignment = 1
 vertical_alignment = 1

@@ -2,6 +2,8 @@ extends Node2D
 ## 上下 2 画面の横スクロール。上の画面に主人公と地形、下の画面に影と同じ形の地形を置き、
 ## 1 台のカメラで上下を同じ横スクロール量で映す。影は主人公と同じ動き・同じ攻撃をする。
 ## 敵は上下どちらの画面にも出て、主人公・影のどちらが触れても共有の体力 (GameState) が減る。
+## ステージが進むのはプレイ中の画面の間だけで、タイトル・ポーズ・ゲームオーバー・ステージクリアの画面は
+## GameState の画面に合わせて重ねて表示する。ステージを最初からやり直す時はこのシーンを読み込み直す。
 
 ## 地形と敵の出現位置の定義
 const Stage := preload("res://scripts/stage.gd")
@@ -34,6 +36,14 @@ const INVINCIBLE_ALPHA: float = 0.5
 const SYNC_COLOR: Color = Color(1.0, 0.82, 0.25, 1.0)
 ## 同期ボーナスの演出の長さ (秒)
 const SYNC_EFFECT_TIME: float = 0.6
+## ゴールの目印の色
+const GOAL_COLOR: Color = Color(1.0, 0.82, 0.25, 0.45)
+## 画面を切り替える入力のアクションと、GameState に送る操作
+const SCREEN_ACTIONS: Dictionary = {
+	"confirm": GameStateScript.Command.CONFIRM,
+	"pause": GameStateScript.Command.PAUSE,
+	"quit_to_title": GameStateScript.Command.QUIT,
+}
 
 ## カメラの横スクロール量 (画面の左端のステージ上の x)
 var scroll_x: float = 0.0
@@ -49,7 +59,7 @@ var recent_hits: Array[Dictionary] = []
 ## 仕切り線の光を消していく途中の Tween。続けて同期ボーナスが出たら止めて光らせ直す
 var sync_flash_tween: Tween = null
 
-## 主人公と影で共有する体力 (autoload の GameState)
+## 表示している画面と、主人公と影で共有する体力 (autoload の GameState)
 @onready var game_state: GameStateScript = get_node("/root/GameState")
 ## 上の画面の主人公
 @onready var hero: Hero = $Hero
@@ -69,14 +79,24 @@ var sync_flash_tween: Tween = null
 @onready var sync_flash: ColorRect = $Overlay/SyncFlash
 ## 体力の表示
 @onready var hp_label: Label = $Overlay/HpLabel
-## ゲームオーバーの表示
-@onready var game_over_panel: Control = $Overlay/GameOver
+## ゴールの目印 (上の画面)
+@onready var goal: ColorRect = $Goal
+## 画面ごとに重ねる表示。GameState の画面がこのキーの時だけ表示する
+@onready var screen_panels: Dictionary = {
+	GameStateScript.Screen.TITLE: $Screens/Title,
+	GameStateScript.Screen.PAUSED: $Screens/Pause,
+	GameStateScript.Screen.GAME_OVER: $Screens/GameOver,
+	GameStateScript.Screen.CLEAR: $Screens/Clear,
+}
 
 
 func _ready() -> void:
 	print("kageboshi boot")
 	game_state.reset()
 	sync_flash.color = SYNC_COLOR
+	goal.position = Stage.GOAL.position
+	goal.size = Stage.GOAL.size
+	goal.color = GOAL_COLOR
 	camera.make_current()
 	_build_terrain()
 	_sync_shadow()
@@ -85,15 +105,31 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if _handle_screen_input():
+		return
+	if game_state.is_playing():
+		_step_stage(delta)
+	_update_hud()
+
+
+## 画面を切り替える入力を GameState に送る。ステージを最初から作り直す遷移なら、このシーンを読み込み直して
+## true を返す (読み込み直すとこのノードは tree から外れるため、呼び出し側はこのフレームの処理をやめる)
+func _handle_screen_input() -> bool:
+	for action: String in SCREEN_ACTIONS:
+		if Input.is_action_just_pressed(action) and game_state.send(SCREEN_ACTIONS[action]):
+			get_tree().reload_current_scene()
+			return true
+	return false
+
+
+## プレイ中の 1 物理フレーム。主人公・影・カメラ・敵を進め、攻撃・接触・ゴールを判定する
+func _step_stage(delta: float) -> void:
 	elapsed += delta
 	game_state.tick(delta)
-	var playing: bool = not game_state.is_game_over()
-	if playing and Input.is_action_just_pressed("attack") and hero.start_attack():
+	if Input.is_action_just_pressed("attack") and hero.start_attack():
 		swing_hits.clear()
 	hero.physics_step(
-		Input.get_axis("move_left", "move_right") if playing else 0.0,
-		playing and Input.is_action_just_pressed("jump"),
-		delta
+		Input.get_axis("move_left", "move_right"), Input.is_action_just_pressed("jump"), delta
 	)
 	_sync_shadow()
 	_follow_camera()
@@ -102,7 +138,8 @@ func _physics_process(delta: float) -> void:
 		enemy.physics_step(delta)
 	_resolve_attack_hits()
 	_resolve_contact_damage()
-	_update_hud()
+	if hero.body_rect().intersects(Stage.GOAL):
+		game_state.clear_stage()
 
 
 ## lane の画面の、x から左へ patrol の幅を往復する敵を置く。floor_y は足元の y 座標 (上の画面の座標)
@@ -257,10 +294,13 @@ func _show_sync_effect() -> void:
 	sync_flash_tween.tween_property(sync_flash, "modulate:a", 0.0, SYNC_EFFECT_TIME)
 
 
-## 体力・ゲームオーバーの表示と、無敵の間の主人公・影の半透明を GameState に合わせる
+## 体力・画面ごとの表示と、無敵の間の主人公・影の半透明を GameState に合わせる
 func _update_hud() -> void:
 	hp_label.text = "HP %d / %d" % [game_state.hp, game_state.MAX_HP]
-	game_over_panel.visible = game_state.is_game_over()
+	hp_label.visible = game_state.screen != GameStateScript.Screen.TITLE
+	for screen: GameStateScript.Screen in screen_panels:
+		var panel: Control = screen_panels[screen]
+		panel.visible = game_state.screen == screen
 	var alpha: float = INVINCIBLE_ALPHA if game_state.is_invincible() else 1.0
 	hero.modulate.a = alpha
 	shadow.modulate.a = alpha
