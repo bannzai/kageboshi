@@ -1,5 +1,6 @@
 extends SceneTree
-## 移動・スクロール・影の位置・攻撃・敵・体力・同期ボーナスの計算、入力割り当て、シーンのロードの検証。
+## 移動・スクロール・影の位置・攻撃・敵・体力・同期ボーナスの計算、入力割り当て、設定と進行の保存・読み込み
+## (壊れた保存データの扱いを含む)、シーンのロードの検証。
 ## 実行方法は AGENTS.md を参照。release ビルドで assert が消えるため、明示的な判定と exit code で結果を返す。
 
 ## 起動検証 (main_scene の --quit) ではロードされない遷移先も含めた全シーン
@@ -19,6 +20,14 @@ const ENEMY_SCRIPT := preload("res://scripts/enemy.gd")
 const COMBAT_SCRIPT := preload("res://scripts/combat.gd")
 ## 体力と無敵時間を持つ autoload のスクリプト
 const GAME_STATE_SCRIPT := preload("res://scripts/game_state.gd")
+## 設定と進行の保存・読み込みを持つ autoload のスクリプト
+const SAVE_DATA_SCRIPT := preload("res://scripts/save_data.gd")
+## project.godot で定義したゲームのアクション (キー割り当てを変えられるアクション)
+const GAME_ACTIONS: Array[String] = [
+	"move_left", "move_right", "jump", "attack", "confirm", "pause", "quit_to_title", "open_settings"
+]
+## 保存・読み込みの検証で書き出す保存データ。プレイヤーの保存データ (user://) を書き換えないよう tmp/ に置く
+const SAVE_TEST_PATH: String = "res://tmp/selfcheck-save.json"
 
 ## 検証が 1 件でも失敗したか。true なら exit code 1 で終わる
 var failed: bool = false
@@ -36,6 +45,9 @@ func _initialize() -> void:
 	_check_screen_transitions()
 	_check_sync_hit()
 	_check_input_map()
+	_check_save_parse()
+	_check_rebound()
+	_check_save_file()
 	_check_scenes()
 	if failed:
 		quit(1)
@@ -203,6 +215,16 @@ func _check_screen_transitions() -> void:
 		[screen.CLEAR, command.CONFIRM, screen.TITLE, true],
 		[screen.CLEAR, command.PAUSE, screen.CLEAR, false],
 		[screen.CLEAR, command.QUIT, screen.CLEAR, false],
+		[screen.TITLE, command.SETTINGS, screen.SETTINGS, false],
+		[screen.TITLE, command.BACK, screen.TITLE, false],
+		[screen.PLAYING, command.SETTINGS, screen.PLAYING, false],
+		[screen.PAUSED, command.SETTINGS, screen.PAUSED, false],
+		[screen.PAUSED, command.BACK, screen.PAUSED, false],
+		[screen.SETTINGS, command.BACK, screen.TITLE, false],
+		[screen.SETTINGS, command.CONFIRM, screen.SETTINGS, false],
+		[screen.SETTINGS, command.PAUSE, screen.SETTINGS, false],
+		[screen.SETTINGS, command.QUIT, screen.SETTINGS, false],
+		[screen.SETTINGS, command.SETTINGS, screen.SETTINGS, false],
 	]
 	var state: Node = GAME_STATE_SCRIPT.new()
 	for case: Array in cases:
@@ -219,11 +241,12 @@ func _check_screen_transitions() -> void:
 			]
 		)
 	state.screen = screen.TITLE
-	state.clear_stage()
+	_check(not state.clear_stage(), "画面: プレイ中でなければゴールに着いてもクリアにならない (false を返す)")
 	_check(state.screen == screen.TITLE, "画面: プレイ中でなければゴールに着いてもクリアにならない")
 	state.screen = screen.PLAYING
-	state.clear_stage()
+	_check(state.clear_stage(), "画面: プレイ中にゴールに着くとステージクリアになる (true を返す)")
 	_check(state.screen == screen.CLEAR, "画面: プレイ中にゴールに着くとステージクリアになる")
+	_check(not state.clear_stage(), "画面: ステージクリアの後にゴールに触れ続けても、もう一度はクリアしない")
 	state.free()
 
 
@@ -251,15 +274,192 @@ func _check_sync_hit() -> void:
 
 
 func _check_input_map() -> void:
-	for action: String in [
-		"move_left", "move_right", "jump", "attack", "confirm", "pause", "quit_to_title"
-	]:
+	for action: String in GAME_ACTIONS:
 		_check(InputMap.has_action(action), "InputMap: %s アクションがある" % action)
 		var has_key: bool = false
 		for event: InputEvent in InputMap.action_get_events(action):
 			if event is InputEventKey:
 				has_key = true
 		_check(has_key, "InputMap: %s にキーが割り当てられている" % action)
+	var rebindable: Array[String] = SAVE_DATA_SCRIPT.rebindable_actions()
+	for action: String in GAME_ACTIONS:
+		_check(rebindable.has(action), "キー設定: %s のキー割り当てを変えられる" % action)
+	for action: String in rebindable:
+		_check(
+			not action.begins_with("ui_") and not action.contains("/"),
+			"キー設定: Godot 組み込みの %s は変えられるアクションに入らない" % action
+		)
+
+
+## 保存データの文字列の解釈。壊れたデータ (JSON でない・形が違う・版が違う) と、一部の値だけがおかしいデータ
+func _check_save_parse() -> void:
+	var defaults: Dictionary = SAVE_DATA_SCRIPT.default_data()
+	var broken_texts: Array[String] = [
+		"", "{", "not json", "[1, 2]", "42", '{"version": 2}', '{"version": "1"}', "{}"
+	]
+	for broken_text: String in broken_texts:
+		var broken: Dictionary = SAVE_DATA_SCRIPT.parse(broken_text)
+		_check(broken["broken"], "保存データ: %s は壊れたデータとして扱う" % broken_text)
+		_check(
+			broken["volumes"] == defaults["volumes"] and broken["cleared_stages"].is_empty()
+			and broken["keys"].is_empty(),
+			"保存データ: 壊れたデータ %s は既定値にする" % broken_text
+		)
+	var empty: Dictionary = SAVE_DATA_SCRIPT.parse('{"version": 1}')
+	_check(not empty["broken"], "保存データ: 版だけのデータは壊れていない")
+	_check(empty["volumes"] == defaults["volumes"], "保存データ: 書かれていない音量は既定値")
+
+	var stages: Array[String] = [STAGE_SCRIPT.ID]
+	var keys: Dictionary = {"jump": [KEY_H]}
+	var text: String = SAVE_DATA_SCRIPT.serialize({"BGM": 0.3, "SE": 0.0}, stages, keys)
+	var loaded: Dictionary = SAVE_DATA_SCRIPT.parse(text)
+	_check(not loaded["broken"], "保存データ: 書き出したデータを読める")
+	_check(is_equal_approx(loaded["volumes"]["BGM"], 0.3), "保存データ: BGM の音量を読み戻せる")
+	_check(loaded["volumes"]["SE"] == 0.0, "保存データ: 効果音の音量 0 を読み戻せる")
+	_check(loaded["cleared_stages"] == stages, "保存データ: クリアしたステージを読み戻せる")
+	_check(loaded["keys"] == keys, "保存データ: キー割り当てを読み戻せる")
+	_check(
+		SAVE_DATA_SCRIPT.serialize(loaded["volumes"], loaded["cleared_stages"], loaded["keys"]) == text,
+		"保存データ: 読み戻した値から同じ文字列を書き出す"
+	)
+
+	var partial: Dictionary = SAVE_DATA_SCRIPT.parse(
+		JSON.stringify(
+			{
+				"version": 1,
+				"volumes": {"BGM": 5.0, "SE": "loud"},
+				"cleared_stages": [1, STAGE_SCRIPT.ID, STAGE_SCRIPT.ID, null],
+				"keys":
+				{
+					"jump": [-3],
+					"attack": [KEY_H, KEY_H],
+					"move_left": "A",
+					"move_right": [KEY_D, 1.5],
+					"pause": [],
+				},
+			}
+		)
+	)
+	_check(not partial["broken"], "保存データ: 一部の値だけがおかしいデータは壊れたデータとしない")
+	_check(partial["volumes"]["BGM"] == 1.0, "保存データ: 範囲を超えた音量は 1.0 に収める")
+	_check(partial["volumes"]["SE"] == SAVE_DATA_SCRIPT.DEFAULT_VOLUME, "保存データ: 数でない音量は既定値")
+	_check(
+		partial["cleared_stages"] == [STAGE_SCRIPT.ID],
+		"保存データ: 文字列でない・重複したクリア済みステージは捨てる"
+	)
+	_check(partial["keys"].keys() == ["attack"], "保存データ: キーコードでない値を含むキー割り当ては捨てる")
+	_check(partial["keys"]["attack"] == [KEY_H], "保存データ: 重複したキーは 1 つにする")
+	_check(SAVE_DATA_SCRIPT.snap_volume(0.34) == 0.3, "保存データ: 音量は 0.1 刻みに丸める")
+	_check(SAVE_DATA_SCRIPT.snap_volume(-1.0) == 0.0, "保存データ: 0 未満の音量は 0 にする")
+
+
+## キー割り当ての変更で、押したキーを使っていた別のアクションとの重なりを解く
+func _check_rebound() -> void:
+	var bindings: Dictionary = {
+		"move_left": [KEY_LEFT, KEY_A],
+		"move_right": [KEY_RIGHT, KEY_D],
+		"jump": [KEY_SPACE],
+	}
+	var moved: Dictionary = SAVE_DATA_SCRIPT.rebound(bindings, "jump", KEY_D)
+	_check(moved["jump"] == [KEY_D], "キー設定: 変えたアクションは押したキーだけになる")
+	_check(moved["move_right"] == [KEY_RIGHT], "キー設定: 押したキーを使っていた別のアクションからは外す")
+	_check(moved["move_left"] == bindings["move_left"], "キー設定: 関係ないアクションはそのまま")
+	var swapped: Dictionary = SAVE_DATA_SCRIPT.rebound(bindings, "move_left", KEY_SPACE)
+	_check(
+		swapped["jump"] == [KEY_LEFT, KEY_A],
+		"キー設定: 押したキーしか無かったアクションには、変えたアクションの元のキーを譲る"
+	)
+	var same: Dictionary = SAVE_DATA_SCRIPT.rebound(bindings, "jump", KEY_SPACE)
+	_check(same == bindings, "キー設定: 今と同じキーにしても何も変わらない")
+	var pressed: InputEventKey = InputEventKey.new()
+	pressed.physical_keycode = KEY_H
+	pressed.pressed = true
+	_check(SAVE_DATA_SCRIPT.pressed_key_code(pressed) == KEY_H, "キー設定: 押したキーの物理キーコードを取る")
+	pressed.echo = true
+	_check(SAVE_DATA_SCRIPT.pressed_key_code(pressed) == 0, "キー設定: 押しっぱなしの繰り返しは取らない")
+	var released: InputEventKey = InputEventKey.new()
+	released.physical_keycode = KEY_H
+	_check(SAVE_DATA_SCRIPT.pressed_key_code(released) == 0, "キー設定: 離した入力は取らない")
+	_check(
+		SAVE_DATA_SCRIPT.pressed_key_code(InputEventMouseButton.new()) == 0,
+		"キー設定: キー以外の入力は取らない"
+	)
+
+
+## ファイルへの保存と読み込み、壊れたファイルの退避。tree に入れない SaveData のインスタンスで行い、
+## 最後に InputMap を project.godot の既定に戻して free する
+func _check_save_file() -> void:
+	var path: String = ProjectSettings.globalize_path(SAVE_TEST_PATH)
+	var broken_path: String = path + SAVE_DATA_SCRIPT.BROKEN_SUFFIX
+	_remove_file(path)
+	_remove_file(broken_path)
+	SAVE_DATA_SCRIPT.add_volume_buses()
+	var saver: Node = SAVE_DATA_SCRIPT.new()
+	saver.load_from(path)
+	_check(not saver.loaded_broken, "保存: 保存データが無ければ壊れていない扱いで始める")
+	_check(saver.cleared_stages.is_empty(), "保存: 保存データが無ければクリアしたステージは無い")
+	_check(saver.key_overrides().is_empty(), "保存: 保存データが無ければキー割り当ては既定")
+
+	saver.set_volume("BGM", 0.3)
+	_check(FileAccess.file_exists(path), "保存: 音量を変えると保存データを書き出す")
+	var bgm: int = AudioServer.get_bus_index("BGM")
+	_check(bgm != -1 and AudioServer.get_bus_index("SE") != -1, "音量: BGM と効果音のバスがある")
+	_check(
+		is_equal_approx(AudioServer.get_bus_volume_db(bgm), linear_to_db(0.3)),
+		"音量: BGM の音量をバスに反映する"
+	)
+	saver.set_volume("SE", 0.0)
+	_check(AudioServer.is_bus_mute(AudioServer.get_bus_index("SE")), "音量: 音量 0 はミュートにする")
+	saver.mark_cleared(STAGE_SCRIPT.ID)
+	saver.mark_cleared(STAGE_SCRIPT.ID)
+	_check(saver.cleared_stages == [STAGE_SCRIPT.ID], "保存: 同じステージを 2 度クリアしても 1 つ")
+	saver.rebind("jump", KEY_H)
+	_check(SAVE_DATA_SCRIPT.action_keys("jump") == [KEY_H], "キー設定: 変えたキーを InputMap に反映する")
+	_check(saver.key_overrides().keys() == ["jump"], "キー設定: 既定と違うアクションだけを保存する")
+	var written: String = FileAccess.get_file_as_string(path)
+	_check(saver.save() == OK, "保存: もう一度保存できる")
+	_check(FileAccess.get_file_as_string(path) == written, "保存: 同じ内容なら同じファイルになる")
+	saver.free()
+
+	InputMap.load_from_project_settings()
+	var loader: Node = SAVE_DATA_SCRIPT.new()
+	loader.load_from(path)
+	_check(not loader.loaded_broken, "読み込み: 書き出した保存データは壊れていない")
+	_check(is_equal_approx(loader.volumes["BGM"], 0.3), "読み込み: BGM の音量を読み戻す")
+	_check(loader.volumes["SE"] == 0.0, "読み込み: 効果音の音量を読み戻す")
+	_check(loader.cleared_stages == [STAGE_SCRIPT.ID], "読み込み: クリアしたステージを読み戻す")
+	_check(SAVE_DATA_SCRIPT.action_keys("jump") == [KEY_H], "読み込み: キー割り当てを InputMap に反映する")
+	_check(
+		is_equal_approx(AudioServer.get_bus_volume_db(bgm), linear_to_db(0.3)),
+		"読み込み: 音量をバスに反映する"
+	)
+
+	var file: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	file.store_string('{"version": 1, "volumes": {"BGM": 0.')
+	file.close()
+	loader.load_from(path)
+	_check(loader.loaded_broken, "壊れた保存データ: 読めないファイルを壊れたと判定する")
+	_check(loader.cleared_stages.is_empty(), "壊れた保存データ: クリアしたステージは無い状態で始める")
+	_check(loader.volumes["BGM"] == SAVE_DATA_SCRIPT.DEFAULT_VOLUME, "壊れた保存データ: 音量は既定値で始める")
+	_check(loader.key_overrides().is_empty(), "壊れた保存データ: キー割り当ては既定で始める")
+	_check(
+		not FileAccess.file_exists(path) and FileAccess.file_exists(broken_path),
+		"壊れた保存データ: 元のファイルを退避して残す"
+	)
+	loader.load_from(path)
+	_check(not loader.loaded_broken, "壊れた保存データ: 退避した後の読み込みでは壊れていない扱い")
+	loader.loaded_broken = true
+	_check(loader.save() == OK and not loader.loaded_broken, "壊れた保存データ: 保存し直すと知らせを消す")
+	loader.free()
+	InputMap.load_from_project_settings()
+	_remove_file(path)
+	_remove_file(broken_path)
+
+
+## path のファイルがあれば消す
+func _remove_file(path: String) -> void:
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
 
 
 ## tree には入れず (_ready を走らせず) インスタンス化だけを確認して free する

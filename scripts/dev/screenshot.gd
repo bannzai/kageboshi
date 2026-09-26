@@ -11,6 +11,10 @@ const Combat := preload("res://scripts/combat.gd")
 const Stage := preload("res://scripts/stage.gd")
 ## 画面 (Screen) の定義を持つ autoload の GameState のスクリプト
 const GameStateScript := preload("res://scripts/game_state.gd")
+## 壊れた保存データの退避先の名前を持つ autoload の SaveData のスクリプト
+const SaveDataScript := preload("res://scripts/save_data.gd")
+## 撮影中の保存データの置き場所。プレイヤーの保存データ (user://) を読み書きせず、毎回まっさらな状態から撮る
+const SAVE_TEST_PATH: String = "res://tmp/screenshot-save.json"
 
 
 ## tree の準備が終わってから _run() を始める (シーンの追加は _initialize() の後でないとできない)
@@ -20,20 +24,28 @@ func _initialize() -> void:
 
 ## 物理フレームを進めながら入力を流すため、同じ実行中に重ねて呼び出さない。
 func _run() -> void:
+	var save_data: Node = root.get_node("SaveData")
+	var save_path: String = ProjectSettings.globalize_path(SAVE_TEST_PATH)
+	_remove_save_files(save_path)
+	save_data.load_from(save_path)
 	if await _capture_scenes():
+		_remove_save_files(save_path)
 		quit(0)
 
 
 ## 撮影する画面の並び (起動直後のタイトル → プレイ開始 → 段差の手前でジャンプした瞬間 → 段差の上 →
 ## 右へスクロールして壁の手前 → ポーズ → 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス →
-## 敵に触れ続けたゲームオーバー → リトライしてゴールに入ったステージクリア)。
+## 敵に触れ続けたゲームオーバー → リトライしてゴールに入ったステージクリア → クリアを保存したタイトル →
+## 設定画面 → キーを待つ設定画面 → 壊れた保存データを既定値に戻したタイトル)。
 ## 失敗した撮影は _capture() が quit(1) 済みなので、false を受けたらそのまま抜ける。
 func _capture_scenes() -> bool:
 	if not await _capture_title():
 		return false
 	if not await _capture_terrain_and_scroll():
 		return false
-	return await _capture_combat()
+	if not await _capture_combat():
+		return false
+	return await _capture_save_and_settings()
 
 
 ## メインシーンを置いてタイトルを撮り、Enter キーでプレイを始めた直後を撮る
@@ -110,11 +122,48 @@ func _capture_combat() -> bool:
 		await physics_frame
 	Input.parse_input_event(_key_event(KEY_RIGHT, false))
 	await create_timer(0.2).timeout
-	if not await _capture("tmp/screenshot-clear.png"):
+	return await _capture("tmp/screenshot-clear.png")
+
+
+## _capture_combat() でステージクリアにしたメインシーンから、Enter キーでタイトルに戻ってクリアの保存を撮り、
+## S キーで開いた設定画面 (BGM の音量を下げた後・キーを待つ間) を撮る。最後に壊れた保存データを読み直して撮る
+func _capture_save_and_settings() -> bool:
+	await _hold_keys([KEY_ENTER], 1)
+	await process_frame
+	await _wait_physics_frames(2)
+	await create_timer(0.2).timeout
+	if not await _capture("tmp/screenshot-title-cleared.png"):
 		return false
-	retried.queue_free()
+	await _hold_keys([KEY_S], 1)
+	await _hold_keys([KEY_LEFT], 1)
+	await _hold_keys([KEY_LEFT], 1)
+	if not await _capture("tmp/screenshot-settings.png"):
+		return false
+	await _hold_keys([KEY_DOWN], 1)
+	await _hold_keys([KEY_DOWN], 1)
+	await _hold_keys([KEY_ENTER], 1)
+	if not await _capture("tmp/screenshot-settings-waiting-key.png"):
+		return false
+	await _hold_keys([KEY_H], 1)
+	await _hold_keys([KEY_ESCAPE], 1)
+	var save_data: Node = root.get_node("SaveData")
+	var file: FileAccess = FileAccess.open(save_data.path, FileAccess.WRITE)
+	file.store_string("{ broken")
+	file.close()
+	save_data.load_from(save_data.path)
+	await _wait_physics_frames(2)
+	if not await _capture("tmp/screenshot-title-broken-save.png"):
+		return false
+	current_scene.queue_free()
 	await process_frame
 	return true
+
+
+## 保存データ path と、壊れた時の退避先を消す (撮影をまっさらな状態から始め、終わったら残さない)
+func _remove_save_files(path: String) -> void:
+	for file: String in [path, path + SaveDataScript.BROKEN_SUFFIX]:
+		if FileAccess.file_exists(file):
+			DirAccess.remove_absolute(file)
 
 
 ## メインシーンを置き、画面の遷移で読み込み直せるよう current_scene にする

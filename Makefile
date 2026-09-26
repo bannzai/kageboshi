@@ -40,7 +40,8 @@ check: import
 	tail -n 1 $(LOG_DIR)/check.log | grep -q '^exit=0$$'
 	! grep -i -e 'WARNING' -e 'ERROR' $(LOG_DIR)/check.log
 
-# 移動・スクロール・攻撃・敵・体力・同期ボーナスの計算、入力割り当て、シーンのロードの検証 (headless)
+# 移動・スクロール・攻撃・敵・体力・同期ボーナスの計算、入力割り当て、設定と進行の保存・読み込み、
+# シーンのロードの検証 (headless)
 selfcheck: import
 	"$(GODOT)" --headless $(ENGINE_LOG) --path . --script res://scripts/dev/selfcheck.gd > $(LOG_DIR)/selfcheck.log 2>&1; \
 	echo "exit=$$?" >> $(LOG_DIR)/selfcheck.log; \
@@ -49,8 +50,8 @@ selfcheck: import
 	! grep -i -e 'WARNING' -e 'ERROR' $(LOG_DIR)/selfcheck.log
 
 # キー入力でメインシーンを動かす入力統合テスト (headless)。主人公の移動・ジャンプ・地形との当たり判定・
-# スクロールと影の同期、攻撃・被弾・ゲームオーバー・同期ボーナス、タイトル・ポーズ・リトライ・ステージクリアの
-# 画面の遷移を確認する
+# スクロールと影の同期、攻撃・被弾・ゲームオーバー・同期ボーナス、タイトル・ポーズ・リトライ・ステージクリア・設定の
+# 画面の遷移、設定画面での音量・キー割り当ての変更と保存を確認する
 integration: import
 	"$(GODOT)" --headless $(ENGINE_LOG) --path . --script res://scripts/dev/integration.gd > $(LOG_DIR)/integration.log 2>&1; \
 	echo "exit=$$?" >> $(LOG_DIR)/integration.log; \

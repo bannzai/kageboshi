@@ -1,7 +1,9 @@
 extends SceneTree
 ## キー入力 (InputMap を通る InputEventKey) でメインシーンの主人公を動かし、地形との当たり判定・スクロール、
 ## 下の画面の影が同じ動き・同じ攻撃をすること、敵を倒す・ダメージを受ける・ゲームオーバー・同期ボーナスと、
-## タイトル・ポーズ・ゲームオーバー・ステージクリアの画面の遷移を検証する。実行方法は AGENTS.md を参照。
+## タイトル・ポーズ・ゲームオーバー・ステージクリア・設定の画面の遷移、クリアしたステージの保存、設定画面での
+## 音量とキー割り当ての変更と保存を検証する。実行方法は AGENTS.md を参照。
+## 保存データはプレイヤーのもの (user://) を書き換えないよう SAVE_TEST_PATH に書き、最後に消す。
 ## 失敗したら quit(1) で終わる。
 
 ## 地形の定義 (段差・壁・地面の位置の期待値に使う)
@@ -14,6 +16,10 @@ const Enemy := preload("res://scripts/enemy.gd")
 const Combat := preload("res://scripts/combat.gd")
 ## 画面 (Screen) の定義を持つ autoload の GameState のスクリプト
 const GameStateScript := preload("res://scripts/game_state.gd")
+## 設定と進行の保存・読み込みを持つ autoload の SaveData のスクリプト
+const SaveDataScript := preload("res://scripts/save_data.gd")
+## 検証中の保存データの置き場所
+const SAVE_TEST_PATH: String = "res://tmp/integration-save.json"
 ## 位置の比較で許す誤差 (px)。CharacterBody2D は地形から safe_margin (0.08 px) だけ離れて止まる
 const POSITION_TOLERANCE: float = 1.0
 ## 最初の段差 (Stage.TERRAIN の 3 番目)
@@ -39,8 +45,15 @@ func _run() -> void:
 	_check(Stage.TERRAIN.has(WALL), "前提: 壁が Stage.TERRAIN にある")
 	var game_state: Node = root.get_node_or_null("GameState")
 	_check(game_state != null, "前提: autoload の GameState が root にある")
-	if game_state != null:
-		await _run_scenes(game_state)
+	var save_data: Node = root.get_node_or_null("SaveData")
+	_check(save_data != null, "前提: autoload の SaveData が root にある")
+	if game_state != null and save_data != null:
+		var save_path: String = ProjectSettings.globalize_path(SAVE_TEST_PATH)
+		_remove_file(save_path)
+		save_data.load_from(save_path)
+		await _run_scenes(game_state, save_data)
+		_remove_file(save_path)
+		save_data.load_from(save_path)
 	if failed:
 		quit(1)
 	else:
@@ -49,7 +62,7 @@ func _run() -> void:
 
 
 ## メインシーンを置いて各検証を順に行う。読み込み直したメインシーンが無ければ (失敗として記録済み) そこでやめる
-func _run_scenes(game_state: Node) -> void:
+func _run_scenes(game_state: Node, save_data: Node) -> void:
 	var main: Node2D = await _start_main(game_state)
 	await _check_move_and_jump(main)
 	await _check_terrain_and_scroll(main)
@@ -63,6 +76,10 @@ func _run_scenes(game_state: Node) -> void:
 	if main == null:
 		return
 	main = await _check_clear(main, game_state)
+	if main == null:
+		return
+	_check_progress_saved(main, save_data)
+	main = await _check_settings(main, game_state, save_data)
 	if main == null:
 		return
 	main.queue_free()
@@ -171,6 +188,106 @@ func _check_clear(main: Node2D, game_state: Node) -> Node2D:
 	_check(game_state.screen == GameStateScript.Screen.TITLE, "クリア後: Enter キーでタイトルに戻る")
 	_check(restarted.get_node("Screens/Title").visible, "クリア後: タイトルが表示される")
 	return restarted
+
+
+## ステージクリアでクリアしたステージが保存され、タイトルに進行が出る
+func _check_progress_saved(main: Node2D, save_data: Node) -> void:
+	_check(save_data.cleared_stages == [Stage.ID], "進行: クリアしたステージを覚える")
+	var saved: Dictionary = SaveDataScript.parse(FileAccess.get_file_as_string(save_data.path))
+	_check(saved["cleared_stages"] == [Stage.ID], "進行: クリアしたステージを保存データに書く")
+	_check(main.get_node("Screens/Title/Progress").visible, "進行: タイトルにクリアしたステージの数が出る")
+
+
+## タイトルから S キーで設定画面を開き、音量とキー割り当てを変えて保存する。変えたキーで遊べ、
+## 保存データを読み直しても変えたキーのまま。最後にキー割り当てを既定に戻す
+func _check_settings(main: Node2D, game_state: Node, save_data: Node) -> Node2D:
+	var menu: Node = await _open_settings(main, game_state, "設定")
+	var rebindable: Array[String] = SaveDataScript.rebindable_actions()
+	_check(
+		menu.rows.size() == SaveDataScript.VOLUME_BUSES.size() + rebindable.size() + 1,
+		"設定: 音量・変えられるアクションごとのキー・既定に戻す行が並ぶ"
+	)
+	await _hold_keys([KEY_LEFT], 1)
+	await _hold_keys([KEY_LEFT], 1)
+	var bgm: int = AudioServer.get_bus_index("BGM")
+	_check(is_equal_approx(save_data.volumes["BGM"], 0.8), "設定: 左キーで BGM の音量が下がる")
+	_check(
+		is_equal_approx(AudioServer.get_bus_volume_db(bgm), linear_to_db(0.8)),
+		"設定: BGM の音量をバスに反映する"
+	)
+	await _hold_keys([KEY_DOWN], 1)
+	for _i: int in range(SaveDataScript.VOLUME_STEPS + 1):
+		await _hold_keys([KEY_LEFT], 1)
+	_check(save_data.volumes["SE"] == 0.0, "設定: 効果音の音量は 0 より下がらない")
+	_check(AudioServer.is_bus_mute(AudioServer.get_bus_index("SE")), "設定: 効果音の音量 0 でミュートになる")
+	var saved: Dictionary = SaveDataScript.parse(FileAccess.get_file_as_string(save_data.path))
+	_check(
+		is_equal_approx(saved["volumes"]["BGM"], 0.8) and saved["volumes"]["SE"] == 0.0,
+		"設定: 変えた音量を保存データに書く"
+	)
+
+	for _i: int in range(rebindable.find("jump") + 1):
+		await _hold_keys([KEY_DOWN], 1)
+	await _hold_keys([KEY_ENTER], 1)
+	_check(menu.waiting_action == "jump", "設定: Enter キーでジャンプのキーを待つ")
+	_check(game_state.screen == GameStateScript.Screen.SETTINGS, "設定: キーを待つ間も設定画面のまま")
+	await _hold_keys([KEY_H], 1)
+	_check(SaveDataScript.action_keys("jump") == [KEY_H], "設定: 押した H キーがジャンプのキーになる")
+	_check(save_data.key_overrides() == {"jump": [KEY_H]}, "設定: 変えたキー割り当てを保存する")
+	await _hold_keys([KEY_ESCAPE], 1)
+	await _wait_physics_frames(2)
+	_check(game_state.screen == GameStateScript.Screen.TITLE, "設定: Esc キーでタイトルに戻る")
+	_check(is_instance_valid(main), "設定: タイトルに戻ってもステージを作り直さない")
+	_check(not menu.visible, "設定: タイトルに戻ると設定画面が消える")
+
+	var hero: Hero = main.get_node("Hero")
+	await _hold_keys([KEY_ENTER], 1)
+	await _wait_physics_frames(2)
+	await _hold_keys([KEY_SPACE], 3)
+	_check(hero.is_on_floor(), "設定: 変える前のジャンプのキー (スペース) では跳ばない")
+	await _hold_keys([KEY_H], 3)
+	_check(not hero.is_on_floor(), "設定: 変えたジャンプのキー (H) で跳ぶ")
+
+	save_data.load_from(save_data.path)
+	_check(SaveDataScript.action_keys("jump") == [KEY_H], "設定: 保存データを読み直しても変えたキーのまま")
+	_check(is_equal_approx(save_data.volumes["BGM"], 0.8), "設定: 保存データを読み直しても変えた音量のまま")
+
+	await _hold_keys([KEY_ESCAPE], 1)
+	await _hold_keys([KEY_Q], 1)
+	var restarted: Node2D = await _reloaded_main(main, "設定の後にタイトルへ戻る")
+	if restarted == null:
+		return null
+	menu = await _open_settings(restarted, game_state, "既定に戻す")
+	await _hold_keys([KEY_UP], 1)
+	await _hold_keys([KEY_ENTER], 1)
+	_check(save_data.key_overrides().is_empty(), "設定: Reset Keys でキー割り当てが既定に戻る")
+	_check(
+		SaveDataScript.action_keys("jump") == SaveDataScript.default_bindings()["jump"],
+		"設定: 既定に戻したジャンプのキーが InputMap に反映される"
+	)
+	await _hold_keys([KEY_ESCAPE], 1)
+	await _wait_physics_frames(2)
+	_check(game_state.screen == GameStateScript.Screen.TITLE, "既定に戻す: Esc キーでタイトルに戻る")
+	return restarted
+
+
+## タイトルで S キーを押して設定画面を開き、設定画面のノードを返す
+func _open_settings(main: Node2D, game_state: Node, label: String) -> Node:
+	_check(game_state.screen == GameStateScript.Screen.TITLE, "%s: タイトルから始める" % label)
+	await _hold_keys([KEY_S], 1)
+	await _wait_physics_frames(2)
+	var menu: Node = main.get_node("Screens/Settings")
+	_check(game_state.screen == GameStateScript.Screen.SETTINGS, "%s: S キーで設定画面になる" % label)
+	_check(menu.visible, "%s: 設定画面が表示される" % label)
+	_check(not main.get_node("Screens/Title").visible, "%s: 設定画面ではタイトルが消える" % label)
+	_check(not main.get_node("Overlay/HpLabel").visible, "%s: 設定画面では体力を表示しない" % label)
+	return menu
+
+
+## path のファイルがあれば消す
+func _remove_file(path: String) -> void:
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
 
 
 ## 画面の遷移でステージを作り直した後の、読み込み直されたメインシーン。主人公は最初の位置にいる。
