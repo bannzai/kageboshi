@@ -13,6 +13,9 @@ const Stage := preload("res://scripts/stage.gd")
 const Hero := preload("res://scripts/hero.gd")
 ## 画面 (Screen) の定義を持つ autoload の GameState のスクリプト
 const GameStateScript := preload("res://scripts/game_state.gd")
+## 前の攻撃のクールダウンが終わるのを待つ物理フレーム数の上限。攻撃の間隔 (0.3 秒 = 18 フレーム) に余裕を持たせ、
+## プレイ中でない画面でクールダウンが進まない時に撮影が止まらないようにする
+const COOLDOWN_FRAME_LIMIT: int = 60
 
 
 ## tree の準備が終わってから _run() を始める (シーンの追加は _initialize() の後でないとできない)
@@ -153,8 +156,14 @@ func _capture_lights() -> bool:
 ## 攻撃が始まらなければ quit(1) する
 func _capture_attack(main: Node2D, path: String) -> bool:
 	var hero: Hero = main.get_node("Hero")
-	while hero.attack_cooldown_left > 0.0:
+	var frames_left: int = COOLDOWN_FRAME_LIMIT
+	while hero.attack_cooldown_left > 0.0 and frames_left > 0:
 		await physics_frame
+		frames_left -= 1
+	if frames_left == 0:
+		push_error("攻撃のクールダウンが %d フレーム以内に終わらない: %s" % [COOLDOWN_FRAME_LIMIT, path])
+		quit(1)
+		return false
 	await _hold_keys([KEY_J], 1)
 	if not main.get_node("Shadow/Attack").visible:
 		push_error("影の攻撃が表示されていない: %s" % path)
