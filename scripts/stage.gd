@@ -5,6 +5,9 @@ extends RefCounted
 ## 敵の出現先の画面 (Combat.Lane)
 const Combat := preload("res://scripts/combat.gd")
 
+## ステージの ID。クリアしたステージとして保存データ (scripts/save_data.gd) に書く。変えると保存済みの進行が外れる
+const ID: String = "stage1"
+
 ## ステージの横幅。カメラはこの範囲の外を映さない
 const WIDTH: float = 3200.0
 ## 地面の上端の y 座標

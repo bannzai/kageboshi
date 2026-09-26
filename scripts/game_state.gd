@@ -1,12 +1,13 @@
 extends Node
 ## ゲーム進行の状態 (autoload の GameState)。いま表示している画面 (タイトル・プレイ中・ポーズ・ゲームオーバー・
-## ステージクリア) と、主人公と影で共有する体力、被弾直後の無敵時間を持つ。
+## ステージクリア・設定) と、主人公と影で共有する体力、被弾直後の無敵時間を持つ。
 ## 体力が 0 になるとゲームオーバーの画面に移る。
 
 ## 表示している画面。ステージが進むのは PLAYING の間だけ
-enum Screen { TITLE, PLAYING, PAUSED, GAME_OVER, CLEAR }
-## 画面を切り替える操作 (project.godot の入力の confirm / pause / quit_to_title)
-enum Command { CONFIRM, PAUSE, QUIT }
+enum Screen { TITLE, PLAYING, PAUSED, GAME_OVER, CLEAR, SETTINGS }
+## 画面を切り替える操作 (project.godot の入力の confirm / pause / quit_to_title / open_settings と、
+## 設定画面を閉じる操作 (Godot 組み込みの ui_cancel。scripts/settings_menu.gd が送る))
+enum Command { CONFIRM, PAUSE, QUIT, SETTINGS, BACK }
 
 ## 体力の最大値。上下の画面の敵に 1 回ずつ触れても半分以上残り、立て直せる値にする
 const MAX_HP: int = 5
@@ -15,11 +16,12 @@ const INVINCIBLE_TIME: float = 1.0
 ## 画面ごとに受け付ける操作と、その操作で移る画面。ここに無い操作はその画面では何もしない。
 ## ゲームオーバーとステージクリアへは操作ではなく、体力 (take_damage) とゴール (clear_stage) で移る
 const TRANSITIONS: Dictionary = {
-	Screen.TITLE: {Command.CONFIRM: Screen.PLAYING},
+	Screen.TITLE: {Command.CONFIRM: Screen.PLAYING, Command.SETTINGS: Screen.SETTINGS},
 	Screen.PLAYING: {Command.PAUSE: Screen.PAUSED},
 	Screen.PAUSED: {Command.PAUSE: Screen.PLAYING, Command.QUIT: Screen.TITLE},
 	Screen.GAME_OVER: {Command.CONFIRM: Screen.PLAYING, Command.QUIT: Screen.TITLE},
 	Screen.CLEAR: {Command.CONFIRM: Screen.TITLE},
+	Screen.SETTINGS: {Command.BACK: Screen.TITLE},
 }
 
 ## 表示している画面。起動時はタイトル
@@ -68,10 +70,12 @@ func tick(delta: float) -> void:
 	invincible_left = maxf(invincible_left - delta, 0.0)
 
 
-## プレイ中にゴールへ着いた時に、ステージクリアの画面に移る。プレイ中でなければ何もしない
-func clear_stage() -> void:
-	if is_playing():
-		screen = Screen.CLEAR
+## プレイ中にゴールへ着いた時に、ステージクリアの画面に移る。プレイ中でなければ何もしない。移ったら true
+func clear_stage() -> bool:
+	if not is_playing():
+		return false
+	screen = Screen.CLEAR
+	return true
 
 
 ## command の操作で画面を移す。遊んでいたステージを捨てて最初から作り直す遷移なら、体力を戻して true を返す
@@ -94,6 +98,9 @@ static func next_screen(from: Screen, command: Command) -> Screen:
 
 
 ## from から to の画面へ移る時に、遊んでいたステージを最初から作り直すか。タイトルへ戻る時と、
-## ゲームオーバーからやり直す時に作り直す (ポーズからの再開とタイトルからの開始は、今のステージのまま続ける)
+## ゲームオーバーからやり直す時に作り直す (ポーズからの再開とタイトルからの開始は、今のステージのまま続ける)。
+## 設定画面はタイトルからしか開かず、ステージは始まる前のままなので、設定画面からタイトルへ戻る時は作り直さない
 static func restarts_stage(from: Screen, to: Screen) -> bool:
+	if from == Screen.SETTINGS:
+		return false
 	return to == Screen.TITLE or (from == Screen.GAME_OVER and to == Screen.PLAYING)
