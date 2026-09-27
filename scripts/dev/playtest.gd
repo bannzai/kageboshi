@@ -26,8 +26,9 @@ const GameStateScript := preload("res://scripts/game_state.gd")
 ## テストプレイ中の保存データの置き場所
 const SAVE_TEST_PATH: String = "res://tmp/playtest-save.json"
 ## 前の敵へ跳ばずに歩いて近づき始める、攻撃する側 (上の画面は主人公、下の画面は影) の体の前端から敵までの距離 (px)。
-## 跳んだまま敵の上に着地して触れないよう、ジャンプ 1 回で進む距離 (約 220 px) の手前から歩く
-const ENGAGE_DISTANCE: float = 160.0
+## 跳んで敵を跳び越したり敵の上に着地して触れたりしないよう、ジャンプ 1 回で進む距離 (約 220 px) に敵 1 体分の
+## 幅を足した距離の手前から歩く
+const ENGAGE_DISTANCE: float = 260.0
 ## 1 ステージでゲームオーバーからやり直せる回数
 const MAX_RETRIES: int = 2
 ## 1 ステージでゴールに着くまで待つ物理フレーム数の、ステージの横幅を移動の速さで進むフレーム数に対する倍率。
@@ -47,6 +48,8 @@ const ALL_CLEAR_TIME: float = 1.5
 var captured: Dictionary = {}
 ## 攻撃キーを押したままか。押した次の物理フレームで離し、次の攻撃で押し直せるようにする
 var attack_held: bool = false
+## 前の物理フレームの体力。減ったら被弾した位置をログに残す
+var last_hp: int = 0
 
 
 ## tree の準備が終わってから _run() を始める (シーンの追加は _initialize() の後でないとできない)
@@ -97,7 +100,13 @@ func _play_stage(main: Node2D, game_state: Node, index: int) -> Node2D:
 		if not await _play_attempt(main, game_state, prefix, frame_limit):
 			return null
 		if game_state.screen == GameStateScript.Screen.CLEAR:
-			print("playtest: %s をクリア (残りの体力 %d、リトライ %d 回)" % [stage.title, game_state.hp, retries])
+			var defeated: int = main.spawned_count - _living_enemies(main).size()
+			print(
+				(
+					"playtest: %s をクリア (残りの体力 %d、倒した敵 %d / 出現 %d、リトライ %d 回)"
+					% [stage.title, game_state.hp, defeated, main.spawned_count, retries]
+				)
+			)
 			return await _leave_clear(main, prefix, index == Stages.count() - 1)
 		var hero_x: float = main.get_node("Hero").position.x
 		print("playtest: %s の x = %.1f でゲームオーバー (%d 回目)" % [stage.title, hero_x, retries + 1])
@@ -118,6 +127,7 @@ func _play_attempt(main: Node2D, game_state: Node, prefix: String, frame_limit: 
 		return false
 	if not await _stitch_and_pull(main, prefix):
 		return false
+	last_hp = game_state.hp
 	await _walk_to_goal(main, game_state, frame_limit, _fight.bind(prefix))
 	_release_attack()
 	if game_state.screen == GameStateScript.Screen.CLEAR or game_state.is_game_over():
@@ -166,6 +176,11 @@ func _stitch_and_pull(main: Node2D, prefix: String) -> bool:
 ## ゴールまで進む経路 (_walk_to_goal()) の、敵と戦いながら進む 1 物理フレーム分の動き方。戦闘は攻撃の見た目が
 ## 出ている、攻撃を始めた次のフレームで撮る
 func _fight(main: Node2D, prefix: String) -> RouteStep:
+	var hp: int = root.get_node("GameState").hp
+	if hp < last_hp:
+		var hero_x: float = main.get_node("Hero").position.x
+		print("playtest: %s の x = %.1f で被弾 (残りの体力 %d)" % [main.stage.title, hero_x, hp])
+	last_hp = hp
 	if attack_held:
 		_release_attack()
 		await _capture_once(prefix + "-combat")
