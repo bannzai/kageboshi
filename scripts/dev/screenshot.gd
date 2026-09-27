@@ -45,9 +45,11 @@ func _run() -> void:
 ## 右へスクロールして壁の手前 → ポーズ → 左へ歩く姿 → 右へ歩く姿 → 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス →
 ## 敵に触れ続けたゲームオーバー → リトライした昼のステージで跳んだ主人公・影と同じ高さを飛ぶ上下の画面の敵 →
 ## 光源の手前から見える上の画面の光 →
-## 高い光源の右側の影響範囲で光源から遠ざかる向きに縮んだ影の体と攻撃 → 影を縫い止めて主人公だけが進んだ影縫い →
+## 高い光源の右側の影響範囲で光源から遠ざかる向きに縮んだ影の体と攻撃 → 縮んだ影が頭の上の低く飛ぶ敵をくぐる →
+## 影を縫い止めて主人公だけが進んだ影縫い →
 ## 引き寄せの途中 → 主人公を止めて影だけが進んだ逆の影縫い → ゴールに入ったステージクリア → 夕方のステージの開始 →
-## 低い光源の右側の影響範囲で光源から遠ざかる向きに伸びた影の体と攻撃 → 夜のステージで点在する光源 → 最後のステージのクリア →
+## 低い光源の右側の影響範囲で光源から遠ざかる向きに伸びた影の体と攻撃 → 伸びた影の股の下を地面を歩く敵が通る →
+## 夜のステージで点在する光源 → 最後のステージのクリア →
 ## クリアを保存したタイトル → 設定画面 → キーを待つ設定画面 → 壊れた保存データを既定値に戻したタイトル)。
 ## 失敗した撮影は _capture() が quit(1) 済みなので、false を受けたらそのまま抜ける。
 func _capture_scenes() -> bool:
@@ -169,7 +171,8 @@ func _capture_flyer() -> bool:
 
 
 ## リトライした昼のステージで影響範囲の手前から見える上の画面の光・高い光源の右側の影響範囲まで右へ歩いて縮んだ
-## 影の体と攻撃・影縫いを撮り、引き寄せで同期に戻してから、ゴールに入ったステージクリアを撮る
+## 影の体と攻撃・縮んだ影がくぐる低く飛ぶ敵・影縫いを撮り、引き寄せで同期に戻してから、ゴールに入ったステージクリアを
+## 撮る
 func _capture_day() -> bool:
 	var main: Node2D = current_scene
 	var high: Dictionary = main.stage.lights[0]
@@ -180,6 +183,9 @@ func _capture_day() -> bool:
 	await _hold_keys([KEY_RIGHT], ceili(walk / Hero.MOVE_SPEED * Engine.physics_ticks_per_second))
 	if not await _capture_attack(main, "tmp/screenshot-light-reverse.png"):
 		return false
+	var duck: String = "tmp/screenshot-shadow-duck.png"
+	if not await _capture_dodge(main, high, Enemy.Kind.LOW_FLYER, duck):
+		return false
 	if not await _capture_stitch(main):
 		return false
 	await _hold_keys([KEY_I], 1)
@@ -188,7 +194,7 @@ func _capture_day() -> bool:
 
 
 ## ステージクリアから Enter キーで進んだ夕方のステージの開始と、低い光源の右側の影響範囲で右を向いた主人公の
-## 光源から遠ざかる向きに伸びた影の体と攻撃を撮り、ゴールまで進める
+## 光源から遠ざかる向きに伸びた影の体と攻撃・伸びた影の股の下を通る地面を歩く敵を撮り、ゴールまで進める
 func _capture_evening() -> bool:
 	var main: Node2D = await _next_scene()
 	await create_timer(0.2).timeout
@@ -198,7 +204,20 @@ func _capture_evening() -> bool:
 	await _place_hero(main, low["x"] + low["zone"] / 2.0)
 	if not await _capture_attack(main, "tmp/screenshot-light-long.png"):
 		return false
+	var straddle: String = "tmp/screenshot-shadow-straddle.png"
+	if not await _capture_dodge(main, low, Enemy.Kind.WALKER, straddle):
+		return false
 	return await _reach_goal(main)
+
+
+## main の主人公を light の右側の影響範囲の中ほどに立たせ、影の真下に止まった kind の下の画面の敵 (縮んだ影の頭の
+## 上の低く飛ぶ敵・伸びた影の股の下の地面を歩く敵) を path へ撮影する。影は敵に触れない (半透明にならない)
+func _capture_dodge(main: Node2D, light: Dictionary, kind: Enemy.Kind, path: String) -> bool:
+	await _place_hero(main, light["x"] + light["zone"] / 2.0)
+	var under_x: float = main.get_node("Hero").position.x + (Hero.SIZE.x - Enemy.SIZE.x) / 2.0
+	main.spawn_enemy(Combat.Lane.BOTTOM, under_x, Stage.GROUND_Y, 0.0, kind)
+	await _wait_physics_frames(10)
+	return await _capture(path)
 
 
 ## ステージクリアから Enter キーで進んだ夜のステージで、点在する光源が 2 本見える位置を撮り、最後のステージの

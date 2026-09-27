@@ -1,10 +1,10 @@
 extends Node2D
 ## 上の画面・下の画面のどちらかに出る敵。地形に関係なく、決まった幅を左右に往復する。地面を歩く敵と、床から
-## FLY_HEIGHT の高さを上下に揺れながら飛ぶ敵がいる。
+## FLY_HEIGHT の高さを上下に揺れながら飛ぶ敵と、下の画面で縮んだ影の頭の上をかすめて低く飛ぶ敵がいる。
 ## 上の画面の敵は主人公に、下の画面の敵は影に触れるとダメージを与える (判定は main.gd)。
 
-## 敵の種類。WALKER は地面を歩き、FLYER は空を飛ぶ
-enum Kind { WALKER, FLYER }
+## 敵の種類。WALKER は地面を歩き、FLYER は空を飛び、LOW_FLYER は低く飛ぶ
+enum Kind { WALKER, FLYER, LOW_FLYER }
 
 ## 出現する画面 (Combat.Lane)
 const Combat := preload("res://scripts/combat.gd")
@@ -25,12 +25,22 @@ const FLY_HEIGHT: float = (
 const BOB_AMPLITUDE: float = 8.0
 ## 飛ぶ敵が上下に 1 往復する時間 (秒)
 const BOB_PERIOD: float = 1.2
+## 低く飛ぶ敵の下をくぐれる、高い光源で縮んだ影の倍率の上限 (scripts/light.gd の shadow_scale())。昼の街灯と
+## 夜の高い街灯の倍率を含む
+const DUCK_SCALE: float = 0.7
+## 低く飛ぶ敵の体の下端の、足元の床からの高さ (揺れの中心)。倍率 1 の影 (主人公と同じ背丈) の頭の高さと、
+## DUCK_SCALE の倍率で縮んだ影の頭の高さの中央にし、倍率 1 の影には当たり、縮んだ影には当たらない
+const LOW_FLY_CLEARANCE: float = Hero.SIZE.y * (1.0 + DUCK_SCALE) / 2.0
+## 低く飛ぶ敵が上下に揺れる幅 (揺れの中心から片側、px)。揺れても体の下端が LOW_FLY_CLEARANCE の上下の
+## 影の頭の高さ (それぞれ約 10 px 離れている) の間に収まる
+const LOW_BOB_AMPLITUDE: float = 4.0
 ## 種類と出現している画面 (Combat.Lane の順) ごとの見た目のアニメーション (scenes/enemy.tscn の SpriteFrames の名前)。
 ## 地面を歩く敵は上の画面が紫・下の画面が影の世界に溶け込みすぎない赤のスライム、空を飛ぶ敵は上の画面が黄色の蜂・
-## 下の画面が灰色の蠅
+## 下の画面が灰色の蠅。低く飛ぶ敵は空を飛ぶ敵と同じ絵を速く羽ばたかせる
 const ANIMATIONS: Dictionary = {
 	Kind.WALKER: [&"top", &"bottom"],
 	Kind.FLYER: [&"flyer_top", &"flyer_bottom"],
+	Kind.LOW_FLYER: [&"low_flyer_top", &"low_flyer_bottom"],
 }
 
 ## 出現している画面
@@ -103,24 +113,35 @@ static func patrol_step(
 	return Vector2(next_x, current_direction)
 
 
-## 出現してから time 秒の enemy_kind の敵の、揺れの中心からの y のずれ。飛ぶ敵は BOB_PERIOD の周期で上下に
-## BOB_AMPLITUDE だけ揺れ (出現した瞬間は中心から下へ動き始める)、地面を歩く敵は揺れない
+## 出現してから time 秒の enemy_kind の敵の、揺れの中心からの y のずれ。飛ぶ敵と低く飛ぶ敵は BOB_PERIOD の周期で
+## 上下に bob_amplitude() だけ揺れ (出現した瞬間は中心から下へ動き始める)、地面を歩く敵は揺れない
 static func bob_offset(enemy_kind: Kind, time: float) -> float:
-	if enemy_kind != Kind.FLYER:
-		return 0.0
-	return sin(TAU * time / BOB_PERIOD) * BOB_AMPLITUDE
+	return sin(TAU * time / BOB_PERIOD) * bob_amplitude(enemy_kind)
 
 
-## 足元の床の y が floor_y の時の、enemy_kind の敵の体の上端の y (飛ぶ敵は揺れの中心)
+## enemy_kind の敵が上下に揺れる幅 (揺れの中心から片側、px)。地面を歩く敵は 0
+static func bob_amplitude(enemy_kind: Kind) -> float:
+	match enemy_kind:
+		Kind.FLYER:
+			return BOB_AMPLITUDE
+		Kind.LOW_FLYER:
+			return LOW_BOB_AMPLITUDE
+	return 0.0
+
+
+## 足元の床の y が floor_y の時の、enemy_kind の敵の体の上端の y (飛ぶ敵・低く飛ぶ敵は揺れの中心)
 static func body_top(enemy_kind: Kind, floor_y: float) -> float:
-	if enemy_kind == Kind.FLYER:
-		return floor_y - FLY_HEIGHT - SIZE.y / 2.0
+	match enemy_kind:
+		Kind.FLYER:
+			return floor_y - FLY_HEIGHT - SIZE.y / 2.0
+		Kind.LOW_FLYER:
+			return floor_y - LOW_FLY_CLEARANCE - SIZE.y
 	return floor_y - SIZE.y
 
 
 ## x から左へ patrol の幅を往復する、足元の床の y が floor_y の enemy_kind の敵の体が、往復と揺れで通る範囲
 static func patrol_area(enemy_kind: Kind, x: float, floor_y: float, patrol: float) -> Rect2:
-	var bob: float = BOB_AMPLITUDE if enemy_kind == Kind.FLYER else 0.0
+	var bob: float = bob_amplitude(enemy_kind)
 	return Rect2(
 		x - patrol, body_top(enemy_kind, floor_y) - bob, patrol + SIZE.x, SIZE.y + bob * 2.0
 	)

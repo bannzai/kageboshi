@@ -228,7 +228,8 @@ func _enemy_in_reach(main: Node2D) -> bool:
 
 
 ## 攻撃する側 (上の画面の敵には主人公、下の画面の敵には影) の向いている先に、体の前端から ENGAGE_DISTANCE 以内の
-## 敵がいるか
+## 敵か、体と横に重なっている敵がいるか。重なっている間も跳ばずに歩き、縮んだ影が頭の上の低く飛ぶ敵へ跳び上がって
+## 触れないようにする
 func _enemy_ahead(main: Node2D) -> bool:
 	var hero: Hero = main.get_node("Hero")
 	var lights: Array[Dictionary] = main.stage.lights
@@ -241,7 +242,7 @@ func _enemy_ahead(main: Node2D) -> bool:
 		var gap: float = (
 			target.position.x - body.end.x if hero.facing > 0.0 else body.position.x - target.end.x
 		)
-		if gap >= 0.0 and gap <= ENGAGE_DISTANCE:
+		if gap > -(body.size.x + target.size.x) and gap <= ENGAGE_DISTANCE:
 			return true
 	return false
 

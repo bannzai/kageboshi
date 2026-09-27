@@ -2,7 +2,9 @@ extends Node2D
 ## 上下 2 画面の横スクロール。上の画面に主人公と地形、下の画面に影と同じ形の地形を置き、
 ## 1 台のカメラで上下を同じ横スクロール量で映す。下の画面は仕切り線を軸に上下逆さまに描き、主人公と影が足元を
 ## 向かい合わせる (bottom_lane)。影は主人公と同じ動き・同じ攻撃をし、光源の左右の影響範囲では光源から遠ざかる
-## 向きに、光源の高さで決まる倍率だけ伸び縮みする (scripts/light.gd)。
+## 向きに、光源の高さで決まる倍率だけ伸び縮みする (scripts/light.gd)。縮んだ影は下の画面の低く飛ぶ敵の下をくぐり、
+## 伸びた影は股の下を下の画面の地面を歩く敵に通らせる (shadow_hit_rects())。光源の灯りと光の色は、その光源で影が
+## 縮むか伸びるかで変える (lamp_color())。
 ## 影縫いで影か主人公を縫い止めると上下の位置がずれ、引き寄せで同期に戻る (scripts/shadow_stitch.gd)。
 ## 敵 (地面を歩く敵と空を飛ぶ敵) は上下どちらの画面にも出て、上の画面の敵が主人公に触れると主人公の体力、
 ## 下の画面の敵が影に触れると影の体力 (GameState) が減る。
@@ -54,8 +56,16 @@ const SYNC_COLOR: Color = Color(1.0, 0.82, 0.25, 1.0)
 const SYNC_EFFECT_TIME: float = 0.6
 ## 光源の柱の色
 const LAMP_POST_COLOR: Color = Color(0.25, 0.22, 0.2, 1.0)
-## 光源の灯りと、影響範囲を照らす光の色
+## 影の長さが変わらない光源 (倍率 1) の灯りと、影響範囲を照らす光の色
 const LAMP_LIGHT_COLOR: Color = Color(1.0, 0.86, 0.45, 1.0)
+## 影が最も縮む高い光源 (倍率 Light.MIN_SCALE) の灯りと光の色。真昼の日差しのような白
+const LAMP_SHRINK_COLOR: Color = Color(0.9, 0.97, 1.0, 1.0)
+## 影が最も伸びる低い光源 (倍率 Light.MAX_SCALE) の灯りと光の色。夕日や松明のような赤みの強い橙
+const LAMP_STRETCH_COLOR: Color = Color(1.0, 0.45, 0.12, 1.0)
+## 伸びた影 (倍率が 1 より大きい影) の足元の、当たり判定の無い隙間の高さ。地面を歩く敵 (Enemy.SIZE.y) が影に
+## 触れずに股の下を通れるよう、敵の背丈に 4 px の余裕を足す (隙間の上端と敵の頭がちょうど接する高さだと、主人公の
+## 位置の小数の誤差で重なり得るため)
+const STRADDLE_GAP: float = Enemy.SIZE.y + 4.0
 ## 上の画面で影響範囲を照らす光の不透明度 (地形・敵が透けて見える薄さにする)
 const LAMP_BEAM_ALPHA: float = 0.3
 ## ゴールの目印の色
@@ -119,6 +129,10 @@ var pulling: bool = false
 @onready var shadow: Node2D = $BottomLane/Shadow
 ## 影の体の見た目。主人公の体の見た目と同じ絵を暗く塗ったもので、高さは光源の倍率で伸び縮みする
 @onready var shadow_body: AnimatedSprite2D = $BottomLane/Shadow/Body
+## 伸びた影の足元の隙間の左右に描く脚 (見た目だけで当たり判定は無い)。伸びている間だけ表示する
+@onready var shadow_legs: Array[ColorRect] = [
+	$BottomLane/Shadow/LegLeft as ColorRect, $BottomLane/Shadow/LegRight as ColorRect
+]
 ## 影の攻撃の見た目。主人公の攻撃から導く
 @onready var shadow_attack: ColorRect = $BottomLane/Shadow/Attack
 ## 影を縫い止めている間に影の足元に刺す針の見た目
@@ -303,11 +317,13 @@ func _terrain_rect(area: Rect2, color: Color) -> ColorRect:
 
 
 ## ステージの光源 (Stage.lights) ごとに、上の画面に光源 (柱と灯り) と、光源の左右の影響範囲を照らす光を置く
-## (影響範囲の予兆)。主人公は画面の中央にいるため、影響範囲は入る半画面前から見える
+## (影響範囲と、影が縮むか伸びるかの予兆。灯りと光の色は lamp_color())。主人公は画面の中央にいるため、影響範囲は
+## 入る半画面前から見える
 func _build_lights() -> void:
 	for light: Dictionary in stage.lights:
 		var x: float = light["x"]
 		var lamp_y: float = Stage.GROUND_Y - light["height"]
+		var color: Color = lamp_color(Light.shadow_scale(light["height"]))
 		var beam: Polygon2D = Polygon2D.new()
 		beam.polygon = PackedVector2Array(
 			[
@@ -316,10 +332,10 @@ func _build_lights() -> void:
 				Vector2(x + light["zone"], Stage.GROUND_Y)
 			]
 		)
-		beam.color = Color(LAMP_LIGHT_COLOR, LAMP_BEAM_ALPHA)
+		beam.color = Color(color, LAMP_BEAM_ALPHA)
 		lights.add_child(beam)
 		lights.add_child(_terrain_rect(Rect2(x - 3.0, lamp_y, 6.0, light["height"]), LAMP_POST_COLOR))
-		lights.add_child(_terrain_rect(Rect2(x - 10.0, lamp_y - 12.0, 20.0, 14.0), LAMP_LIGHT_COLOR))
+		lights.add_child(_terrain_rect(Rect2(x - 10.0, lamp_y - 12.0, 20.0, 14.0), color))
 
 
 ## 影縫い・引き寄せの入力とゲージから、このフレームの縫い止めを決める。縫い止めている間はゲージを減らす。
@@ -370,12 +386,19 @@ func _move_shadow_offset(direction: float, delta: float) -> void:
 
 ## 影の位置・長さ・姿・攻撃は、主人公と主人公がいる影響範囲の光源から導いた同期中の影に、影縫いのずれを
 ## 足して導く (.claude/rules/shadow-position-derived-from-hero.md)。影の体の見た目は主人公の体の見た目と同じ
-## アニメーションの同じ枚目を同じ向きで、影の体の矩形の足元の中央に置き、高さを矩形の高さに合わせて伸び縮みさせる
+## アニメーションの同じ枚目を同じ向きで、影の体の矩形から足元の隙間 (straddle_gap()) を除いた部分 (当たり判定の
+## 矩形) の足元の中央に置き、高さをその部分の高さに合わせて伸び縮みさせる。隙間には左右の脚を描く
 func _sync_shadow() -> void:
 	shadow.position = shadow_position(hero.position) + shadow_offset
 	var body: Rect2 = shadow_body_rect(hero.position, stage.lights, shadow_offset)
-	shadow_body.position = Vector2(body.get_center().x, body.end.y) - shadow.position
-	shadow_body.scale = Vector2(hero.body.scale.x, hero.body.scale.y * body.size.y / Hero.SIZE.y)
+	var gap: float = straddle_gap(hero.position, stage.lights)
+	var torso: Rect2 = body.grow_side(SIDE_BOTTOM, -gap)
+	shadow_body.position = Vector2(torso.get_center().x, torso.end.y) - shadow.position
+	shadow_body.scale = Vector2(hero.body.scale.x, hero.body.scale.y * torso.size.y / Hero.SIZE.y)
+	for leg: ColorRect in shadow_legs:
+		leg.visible = gap > 0.0
+		leg.position.y = torso.end.y - shadow.position.y
+		leg.size.y = gap
 	shadow_body.flip_h = hero.facing < 0.0
 	shadow_body.animation = hero.body.animation
 	shadow_body.frame = hero.body.frame
@@ -459,14 +482,16 @@ func _resolve_attack_hits() -> void:
 	_show_sync_effect()
 
 
-## 上の画面の敵が主人公に触れていたら主人公の体力を、下の画面の敵が影に触れていたら影の体力を減らす
+## 上の画面の敵が主人公に触れていたら主人公の体力を、下の画面の敵が影の当たり判定 (shadow_hit_rects()) に
+## 触れていたら影の体力を減らす
 func _resolve_contact_damage() -> void:
-	var bodies: Array[Rect2] = [
-		hero.body_rect(), shadow_body_rect(hero.position, stage.lights, shadow_offset)
+	var hero_rects: Array[Rect2] = [hero.body_rect()]
+	var bodies: Array[Array] = [
+		hero_rects, shadow_hit_rects(hero.position, stage.lights, shadow_offset)
 	]
 	for enemy: Enemy in _living_enemies():
 		if (
-			bodies[enemy.lane].intersects(enemy.body_rect())
+			touches(bodies[enemy.lane], enemy.body_rect())
 			and game_state.take_damage(enemy.lane, CONTACT_DAMAGE)
 		):
 			damage_sound.play()
@@ -561,8 +586,9 @@ static func shadow_position(hero_position: Vector2) -> Vector2:
 
 ## 体の左上が hero_position の主人公の、光源が lights (Stage.lights の形) のステージで影縫いのずれが offset の
 ## 影の体の矩形。足元と横位置は shadow_position() から offset だけ離れた体と同じで、高さを主人公がいる光源の倍率で
-## 伸び縮みさせる (敵との接触もこの矩形で判定する)。offset の既定の ZERO は影縫いでずれていない同期中の影を表し、
-## 同期中の影だけを確かめる検証 (scripts/dev/selfcheck.gd の光源の検証) から省いて呼べるようにする
+## 伸び縮みさせる (敵との接触はこの矩形から足元の隙間を除いた shadow_hit_rects() で判定する)。offset の既定の ZERO は
+## 影縫いでずれていない同期中の影を表し、同期中の影だけを確かめる検証 (scripts/dev/selfcheck.gd の光源の検証) から
+## 省いて呼べるようにする
 static func shadow_body_rect(
 	hero_position: Vector2, lights: Array[Dictionary], offset: Vector2 = Vector2.ZERO
 ) -> Rect2:
@@ -571,6 +597,44 @@ static func shadow_body_rect(
 		Hero.SIZE.y * Light.shadow_scale_at(hero_position.x + Hero.SIZE.x / 2.0, lights)
 	)
 	return Rect2(at.x, at.y + Hero.SIZE.y - height, Hero.SIZE.x, height)
+
+
+## 体の左上が hero_position の主人公の、光源が lights のステージの影の足元にできる、当たり判定の無い隙間の高さ。
+## 主人公がいる光源で影が伸びている (倍率が 1 より大きい) 間だけ STRADDLE_GAP で、それ以外は 0
+static func straddle_gap(hero_position: Vector2, lights: Array[Dictionary]) -> float:
+	var stretch: float = Light.shadow_scale_at(hero_position.x + Hero.SIZE.x / 2.0, lights)
+	return STRADDLE_GAP if stretch > 1.0 else 0.0
+
+
+## shadow_body_rect() と同じ引数の影の、下の画面の敵との当たり判定の矩形の集まり。影の体の矩形から、足元の
+## 体の幅いっぱいの隙間 (straddle_gap()) を除いた形。地面を歩く敵は横から来るため、隙間の左右の脚に当たり判定が
+## 残ると通り抜ける途中で必ず脚に触れる。そこで脚は見た目だけにし (_sync_shadow())、今は矩形 1 つになる。
+## 縮んだ影は体の矩形のまま低くなり、頭の上を低く飛ぶ敵 (Enemy.Kind.LOW_FLYER) に触れない
+static func shadow_hit_rects(
+	hero_position: Vector2, lights: Array[Dictionary], offset: Vector2 = Vector2.ZERO
+) -> Array[Rect2]:
+	var body: Rect2 = shadow_body_rect(hero_position, lights, offset)
+	var rects: Array[Rect2] = [
+		body.grow_side(SIDE_BOTTOM, -straddle_gap(hero_position, lights))
+	]
+	return rects
+
+
+## rects (当たり判定の矩形の集まり) のどれかが area に重なるか (辺が接するだけなら重ならない)
+static func touches(rects: Array[Rect2], area: Rect2) -> bool:
+	for rect: Rect2 in rects:
+		if rect.intersects(area):
+			return true
+	return false
+
+
+## 倍率が light_scale の光源 (Light.shadow_scale()) の灯りと光の色。倍率 1 は LAMP_LIGHT_COLOR で、影が縮むほど
+## LAMP_SHRINK_COLOR の白に、伸びるほど LAMP_STRETCH_COLOR の橙に近づく
+static func lamp_color(light_scale: float) -> Color:
+	if light_scale < 1.0:
+		var shrink: float = inverse_lerp(1.0, Light.MIN_SCALE, light_scale)
+		return LAMP_LIGHT_COLOR.lerp(LAMP_SHRINK_COLOR, shrink)
+	return LAMP_LIGHT_COLOR.lerp(LAMP_STRETCH_COLOR, inverse_lerp(1.0, Light.MAX_SCALE, light_scale))
 
 
 ## 体の左上が hero_position で hero_facing を向いている主人公の、光源が lights のステージで影縫いのずれが
