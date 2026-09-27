@@ -1,8 +1,8 @@
 extends Node2D
 ## 上下 2 画面の横スクロール。上の画面に主人公と地形、下の画面に影と同じ形の地形を置き、
 ## 1 台のカメラで上下を同じ横スクロール量で映す。下の画面は仕切り線を軸に上下逆さまに描き、主人公と影が足元を
-## 向かい合わせる (bottom_lane)。影は主人公と同じ動き・同じ攻撃をし、光源をまたいだ先の反転区間でだけ
-## 左右の動きが逆になり、光源の高さで伸び縮みする (scripts/light.gd)。
+## 向かい合わせる (bottom_lane)。影は主人公と同じ動き・同じ攻撃をし、光源の左右の影響範囲では光源から遠ざかる
+## 向きに、光源の高さで決まる倍率だけ伸び縮みする (scripts/light.gd)。
 ## 影縫いで影か主人公を縫い止めると上下の位置がずれ、引き寄せで同期に戻る (scripts/shadow_stitch.gd)。
 ## 敵 (地面を歩く敵と空を飛ぶ敵) は上下どちらの画面にも出て、上の画面の敵が主人公に触れると主人公の体力、
 ## 下の画面の敵が影に触れると影の体力 (GameState) が減る。
@@ -17,7 +17,7 @@ extends Node2D
 const Stage := preload("res://scripts/stage.gd")
 ## ステージごとの BGM
 const StageBgm := preload("res://scripts/stage_bgm.gd")
-## 光源による影の反転と倍率の計算
+## 光源による影の伸び縮みの計算
 const Light := preload("res://scripts/light.gd")
 ## 主人公のスクリプト (体の大きさ・攻撃の範囲と 1 物理フレームの進め方)
 const Hero := preload("res://scripts/hero.gd")
@@ -54,9 +54,9 @@ const SYNC_COLOR: Color = Color(1.0, 0.82, 0.25, 1.0)
 const SYNC_EFFECT_TIME: float = 0.6
 ## 光源の柱の色
 const LAMP_POST_COLOR: Color = Color(0.25, 0.22, 0.2, 1.0)
-## 光源の灯りと、反転区間を照らす光の色
+## 光源の灯りと、影響範囲を照らす光の色
 const LAMP_LIGHT_COLOR: Color = Color(1.0, 0.86, 0.45, 1.0)
-## 上の画面で反転区間を照らす光の不透明度 (地形・敵が透けて見える薄さにする)
+## 上の画面で影響範囲を照らす光の不透明度 (地形・敵が透けて見える薄さにする)
 const LAMP_BEAM_ALPHA: float = 0.3
 ## ゴールの目印の色
 const GOAL_COLOR: Color = Color(1.0, 0.82, 0.25, 0.45)
@@ -131,7 +131,7 @@ var pulling: bool = false
 @onready var top_terrain: Node2D = $TopTerrain
 ## 下の画面の地形 (見た目だけ) を入れる親。上の画面 1 つ分下にずらしてある
 @onready var bottom_terrain: Node2D = $BottomLane/BottomTerrain
-## 上の画面の光源と反転区間を照らす光 (見た目だけ) を入れる親
+## 上の画面の光源と影響範囲を照らす光 (見た目だけ) を入れる親
 @onready var lights: Node2D = $Lights
 ## 敵を入れる親。Combat.Lane で引く (上の画面の敵は Enemies、下の画面の敵は BottomLane/Enemies)
 @onready var lane_enemies: Array[Node2D] = [$Enemies as Node2D, $BottomLane/Enemies as Node2D]
@@ -302,15 +302,19 @@ func _terrain_rect(area: Rect2, color: Color) -> ColorRect:
 	return rect
 
 
-## ステージの光源 (Stage.lights) ごとに、上の画面に光源 (柱と灯り) と反転区間を照らす光を置く (反転区間の予兆)。
-## 主人公は画面の中央にいるため、反転区間は入る半画面前から見える
+## ステージの光源 (Stage.lights) ごとに、上の画面に光源 (柱と灯り) と、光源の左右の影響範囲を照らす光を置く
+## (影響範囲の予兆)。主人公は画面の中央にいるため、影響範囲は入る半画面前から見える
 func _build_lights() -> void:
 	for light: Dictionary in stage.lights:
 		var x: float = light["x"]
 		var lamp_y: float = Stage.GROUND_Y - light["height"]
 		var beam: Polygon2D = Polygon2D.new()
 		beam.polygon = PackedVector2Array(
-			[Vector2(x, lamp_y), Vector2(x, Stage.GROUND_Y), Vector2(x + light["zone"], Stage.GROUND_Y)]
+			[
+				Vector2(x, lamp_y),
+				Vector2(x - light["zone"], Stage.GROUND_Y),
+				Vector2(x + light["zone"], Stage.GROUND_Y)
+			]
 		)
 		beam.color = Color(LAMP_LIGHT_COLOR, LAMP_BEAM_ALPHA)
 		lights.add_child(beam)
@@ -347,7 +351,7 @@ func _update_pin(delta: float) -> void:
 
 ## 主人公が動いた後の影のずれを、縫い止め・引き寄せに合わせて進める。同期している間はゲージを回復する
 func _move_shadow_offset(direction: float, delta: float) -> void:
-	var synced: Vector2 = shadow_position(hero.position, stage.lights)
+	var synced: Vector2 = shadow_position(hero.position)
 	match pin:
 		ShadowStitch.Pin.SHADOW:
 			shadow_offset = ShadowStitch.pinned_offset(pinned_position, synced, stage.width)
@@ -364,15 +368,15 @@ func _move_shadow_offset(direction: float, delta: float) -> void:
 				game_state.recover_gauge(delta)
 
 
-## 影の位置・長さ・向き・姿・攻撃は、主人公と主人公がいる反転区間の光源から導いた同期中の影に、影縫いのずれを
+## 影の位置・長さ・姿・攻撃は、主人公と主人公がいる影響範囲の光源から導いた同期中の影に、影縫いのずれを
 ## 足して導く (.claude/rules/shadow-position-derived-from-hero.md)。影の体の見た目は主人公の体の見た目と同じ
-## アニメーションの同じ枚目を、影の体の矩形の足元の中央に置き、高さを矩形の高さに合わせて伸び縮みさせる
+## アニメーションの同じ枚目を同じ向きで、影の体の矩形の足元の中央に置き、高さを矩形の高さに合わせて伸び縮みさせる
 func _sync_shadow() -> void:
-	shadow.position = shadow_position(hero.position, stage.lights) + shadow_offset
+	shadow.position = shadow_position(hero.position) + shadow_offset
 	var body: Rect2 = shadow_body_rect(hero.position, stage.lights, shadow_offset)
 	shadow_body.position = Vector2(body.get_center().x, body.end.y) - shadow.position
 	shadow_body.scale = Vector2(hero.body.scale.x, hero.body.scale.y * body.size.y / Hero.SIZE.y)
-	shadow_body.flip_h = shadow_facing(hero.position, hero.facing, stage.lights) < 0.0
+	shadow_body.flip_h = hero.facing < 0.0
 	shadow_body.animation = hero.body.animation
 	shadow_body.frame = hero.body.frame
 	var attack: Rect2 = shadow_attack_area(hero.position, hero.facing, stage.lights, shadow_offset)
@@ -548,26 +552,21 @@ static func hint_text(hints: Array) -> String:
 	return "    ".join(parts)
 
 
-## 体の左上が hero_position の主人公の、光源が lights (Stage.lights の形) のステージでの同期中の影の位置
-## (伸び縮みさせる前の、主人公と同じ大きさの体の左上)。上の画面 1 つ分下で、横は主人公の体の中心を
-## Light.shadow_center_x() で写した位置 (反転区間の外は主人公と同じ)。
+## 体の左上が hero_position の主人公の同期中の影の位置 (伸び縮みさせる前の、主人公と同じ大きさの体の左上)。
+## 主人公の上の画面 1 つ分下で、光源の影響範囲でも変わらない。
 ## 影縫いでずれている間の影は、ここから shadow_offset だけ離れる
-static func shadow_position(hero_position: Vector2, lights: Array[Dictionary]) -> Vector2:
-	var half_width: float = Hero.SIZE.x / 2.0
-	return Vector2(
-		Light.shadow_center_x(hero_position.x + half_width, lights) - half_width,
-		hero_position.y + SCREEN_HEIGHT
-	)
+static func shadow_position(hero_position: Vector2) -> Vector2:
+	return hero_position + Vector2(0.0, SCREEN_HEIGHT)
 
 
-## 体の左上が hero_position の主人公の、光源が lights のステージで影縫いのずれが offset の影の体の矩形。
-## 足元と横位置は shadow_position() から offset だけ離れた体と同じで、高さを主人公がいる光源の倍率で伸び縮みさせる
-## (敵との接触もこの矩形で判定する)。offset の既定の ZERO は影縫いでずれていない同期中の影を表し、
+## 体の左上が hero_position の主人公の、光源が lights (Stage.lights の形) のステージで影縫いのずれが offset の
+## 影の体の矩形。足元と横位置は shadow_position() から offset だけ離れた体と同じで、高さを主人公がいる光源の倍率で
+## 伸び縮みさせる (敵との接触もこの矩形で判定する)。offset の既定の ZERO は影縫いでずれていない同期中の影を表し、
 ## 同期中の影だけを確かめる検証 (scripts/dev/selfcheck.gd の光源の検証) から省いて呼べるようにする
 static func shadow_body_rect(
 	hero_position: Vector2, lights: Array[Dictionary], offset: Vector2 = Vector2.ZERO
 ) -> Rect2:
-	var at: Vector2 = shadow_position(hero_position, lights) + offset
+	var at: Vector2 = shadow_position(hero_position) + offset
 	var height: float = (
 		Hero.SIZE.y * Light.shadow_scale_at(hero_position.x + Hero.SIZE.x / 2.0, lights)
 	)
@@ -575,35 +574,28 @@ static func shadow_body_rect(
 
 
 ## 体の左上が hero_position で hero_facing を向いている主人公の、光源が lights のステージで影縫いのずれが
-## offset の影の攻撃の範囲。影の体 (shadow_position() から offset だけ離れた位置) から出る。反転区間では主人公と
-## 逆を向き、リーチは光源の倍率で伸び縮みする。高さは主人公と同じ (足元から同じ高さに出て、地面に立つ敵に届く)。
-## offset の既定の ZERO の意図は shadow_body_rect() と同じ
+## offset の影の攻撃の範囲。影の体 (shadow_position() から offset だけ離れた位置) から主人公と同じ向きに出て、
+## 光源から遠ざかる向きを向いている時だけリーチが光源の倍率で伸び縮みする。高さは主人公と同じ (足元から同じ高さに
+## 出て、地面に立つ敵に届く)。offset の既定の ZERO の意図は shadow_body_rect() と同じ
 static func shadow_attack_area(
 	hero_position: Vector2,
 	hero_facing: float,
 	lights: Array[Dictionary],
 	offset: Vector2 = Vector2.ZERO
 ) -> Rect2:
+	var center_x: float = hero_position.x + Hero.SIZE.x / 2.0
 	return Hero.attack_area(
-		shadow_position(hero_position, lights) + offset,
-		shadow_facing(hero_position, hero_facing, lights),
-		Hero.ATTACK_REACH * Light.shadow_scale_at(hero_position.x + Hero.SIZE.x / 2.0, lights)
+		shadow_position(hero_position) + offset,
+		hero_facing,
+		Hero.ATTACK_REACH * Light.reach_scale_at(center_x, hero_facing, lights)
 	)
 
 
-## 体の左上が hero_position で hero_facing を向いている主人公の、光源が lights のステージでの影の向き
-## (-1 = 左、1 = 右)。反転区間では主人公と逆を向く
-static func shadow_facing(
-	hero_position: Vector2, hero_facing: float, lights: Array[Dictionary]
-) -> float:
-	return hero_facing * Light.shadow_direction(hero_position.x + Hero.SIZE.x / 2.0, lights)
-
-
-## light (Stage.lights の要素) の反転区間で、影の体の中心が逆へ動く範囲の下の画面の矩形 (地面より上)。
-## 光源の x から左へ、反転区間の幅に光源の倍率を掛けた幅
-static func shadow_reverse_range(light: Dictionary) -> Rect2:
-	var width: float = light["zone"] * Light.shadow_scale(light["height"])
-	return Rect2(light["x"] - width, SCREEN_HEIGHT, width, Stage.GROUND_Y)
+## light (Stage.lights の要素) の影響範囲に主人公の体の中心がある間に、主人公の体が動く上の画面の範囲 (地面より上)。
+## 光源の x から左右へ zone の幅に、主人公の体の幅の半分ずつを足した幅
+static func light_zone_range(light: Dictionary) -> Rect2:
+	var half_width: float = light["zone"] + Hero.SIZE.x / 2.0
+	return Rect2(light["x"] - half_width, 0.0, half_width * 2.0, Stage.GROUND_Y)
 
 
 ## 主人公の中心が hero_center_x の時の、横幅 stage_width のステージの横スクロール量。主人公を画面の中央に置き、
