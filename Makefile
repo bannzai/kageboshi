@@ -9,7 +9,7 @@ LOG_DIR := tmp
 # 起動に失敗するため、すべての Godot 起動に付ける ($@ は実行中の target 名)
 ENGINE_LOG = --log-file $(abspath $(LOG_DIR))/$@.godot.log
 
-# 描画付きで起動する target (screenshot / movie) の共通オプション。headless では描画されないため付けない。
+# 描画付きで起動する target (screenshot / movie / playtest) の共通オプション。headless では描画されないため付けない。
 # CI の Linux では Xvfb + Mesa llvmpipe 上で実行する
 WINDOWED_FLAGS := --audio-driver Dummy --rendering-driver opengl3 --resolution 1280x720 --windowed --position 0,0
 # 描画付き起動でだけ出る、描画に影響しない OS / ドライバ由来の行。ログの WARNING / ERROR 検査から除外する
@@ -18,8 +18,11 @@ WINDOWED_LOG_NOISE := -e 'Could not set V-Sync mode' -e 'IMKCFRunLoopWakeUpRelia
 # movie target が録画するフレーム数 (30 fps 固定。150 = 5 秒)。操作なしの起動〜メインシーン表示の確認には
 # 数秒あれば足り、CI の録画時間と artifact のサイズを抑えるため
 MOVIE_FRAMES ?= 150
+# playtest target が録画するフレーム数の上限 (30 fps 固定。5400 = 3 分)。テストプレイは ALL CLEAR で自分で終わり、
+# ここに達したら playtest OK が出ずに失敗する (全ステージを通しても 3 分以内に収め、止まった時に CI を待たせない)
+PLAYTEST_FRAME_LIMIT ?= 5400
 
-.PHONY: import check selfcheck integration lint test screenshot movie run build-macos build-windows build-linux build-all clean
+.PHONY: import check selfcheck integration lint test screenshot movie playtest run build-macos build-windows build-linux build-all clean
 
 # ログ・撮影の出力先。.gdignore を置き、撮影した PNG を Godot に import させない
 $(LOG_DIR)/.gdignore:
@@ -66,7 +69,7 @@ integration: import
 lint:
 	gdlint scripts/
 
-# headless 検証の一括実行 (CI の lint / check-and-export job と同じ内容。描画付きの screenshot / movie は含まない)
+# headless 検証の一括実行 (CI の lint / check-and-export job と同じ内容。描画付きの screenshot / movie / playtest は含まない)
 test: lint check selfcheck integration
 
 # 実際の描画で代表画面を撮影する (headless の検証では見た目の崩れを検出できない)。撮影した PNG は目視してから
@@ -92,6 +95,20 @@ movie: import
 	rm -f $(LOG_DIR)/movie.avi
 	ffmpeg -v error -sseof -1 -i $(LOG_DIR)/movie.mp4 -frames:v 1 -vf signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=- -f null - \
 	  | awk -F= '/YAVG/ { found = 1; exit ($$2 >= 32) ? 0 : 1 } END { if (!found) exit 1 }'
+
+# タイトルから全ステージを ALL CLEAR まで通して遊ぶテストプレイを Movie Maker モードで録画して mp4 にし、ステージごとの
+# 開始・光源の反転区間・敵との戦闘・クリアの時点の静止画 tmp/playtest-*.png を書き出す。録画と静止画は目視して問題を
+# 探す (AGENTS.md「検証方法」)
+playtest: import
+	rm -f $(LOG_DIR)/playtest.avi $(LOG_DIR)/playtest.mp4 $(LOG_DIR)/playtest-*.png
+	"$(GODOT)" $(ENGINE_LOG) --path . $(WINDOWED_FLAGS) --write-movie $(LOG_DIR)/playtest.avi --fixed-fps 30 --quit-after $(PLAYTEST_FRAME_LIMIT) --script res://scripts/dev/playtest.gd > $(LOG_DIR)/playtest.log 2>&1; \
+	echo "exit=$$?" >> $(LOG_DIR)/playtest.log; \
+	grep -q '^playtest OK$$' $(LOG_DIR)/playtest.log
+	tail -n 1 $(LOG_DIR)/playtest.log | grep -q '^exit=0$$'
+	! grep -i -e 'WARNING' -e 'ERROR' $(LOG_DIR)/playtest.log | grep -v $(WINDOWED_LOG_NOISE) | grep -q .
+	ffmpeg -loglevel error -y -i $(LOG_DIR)/playtest.avi -c:v libx264 -pix_fmt yuv420p $(LOG_DIR)/playtest.mp4
+	rm -f $(LOG_DIR)/playtest.avi
+	ls $(LOG_DIR)/playtest-*.png
 
 # エディタなしでゲームを起動する (手動確認用)。先にアセットをインポートする (.godot/ が無い初回や素材の追加後に、
 # エディタを開かずに起動すると音声などの素材が読み込めず起動に失敗するため)
