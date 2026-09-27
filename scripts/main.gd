@@ -4,7 +4,8 @@ extends Node2D
 ## 向かい合わせる (bottom_lane)。影は主人公と同じ動き・同じ攻撃をし、光源をまたいだ先の反転区間でだけ
 ## 左右の動きが逆になり、光源の高さで伸び縮みする (scripts/light.gd)。
 ## 影縫いで影か主人公を縫い止めると上下の位置がずれ、引き寄せで同期に戻る (scripts/shadow_stitch.gd)。
-## 敵は上下どちらの画面にも出て、主人公・影のどちらが触れても共有の体力 (GameState) が減る。
+## 敵は上下どちらの画面にも出て、上の画面の敵が主人公に触れると主人公の体力、下の画面の敵が影に触れると影の体力
+## (GameState) が減る。
 ## ステージが進むのはプレイ中の画面の間だけで、タイトル・ポーズ・ゲームオーバー・ステージクリア・設定の画面は
 ## GameState の画面に合わせて重ねて表示する。ステージを最初からやり直す時と次のステージへ進む時は、このシーンを
 ## 読み込み直す。遊んでいるステージ (昼・夕方・夜) は GameState が持つ。
@@ -100,7 +101,7 @@ var shadow_offset: Vector2 = Vector2.ZERO
 ## 引き寄せの途中か。ずれが 0 に戻ったら終わる
 var pulling: bool = false
 
-## 表示している画面と、遊んでいるステージ、主人公と影で共有する体力 (autoload の GameState)
+## 表示している画面と、遊んでいるステージ、主人公と影それぞれの体力 (autoload の GameState)
 @onready var game_state: GameStateScript = get_node("/root/GameState")
 ## 遊んでいるステージ。シーンを読み込み直すまで変わらない
 @onready var stage: Stage = game_state.current_stage()
@@ -136,8 +137,10 @@ var pulling: bool = false
 @onready var lane_enemies: Array[Node2D] = [$Enemies as Node2D, $BottomLane/Enemies as Node2D]
 ## 上下の画面の仕切り線に重ねる光。同期ボーナスの時だけ不透明にしてから消す
 @onready var sync_flash: ColorRect = $Overlay/SyncFlash
-## 体力の表示
+## 主人公の体力の表示 (上の画面)
 @onready var hp_label: Label = $Overlay/HpLabel
+## 影の体力の表示 (下の画面)
+@onready var shadow_hp_label: Label = $Overlay/ShadowHpLabel
 ## 遊んでいるステージの番号と名前の表示
 @onready var stage_label: Label = $Overlay/StageLabel
 ## 上の画面の背景。ステージの空の色で塗る
@@ -442,13 +445,16 @@ func _resolve_attack_hits() -> void:
 	_show_sync_effect()
 
 
-## 上の画面の敵が主人公に、下の画面の敵が影に触れていたら体力を減らす
+## 上の画面の敵が主人公に触れていたら主人公の体力を、下の画面の敵が影に触れていたら影の体力を減らす
 func _resolve_contact_damage() -> void:
 	var bodies: Array[Rect2] = [
 		hero.body_rect(), shadow_body_rect(hero.position, stage.lights, shadow_offset)
 	]
 	for enemy: Enemy in _living_enemies():
-		if bodies[enemy.lane].intersects(enemy.body_rect()) and game_state.take_damage(CONTACT_DAMAGE):
+		if (
+			bodies[enemy.lane].intersects(enemy.body_rect())
+			and game_state.take_damage(enemy.lane, CONTACT_DAMAGE)
+		):
 			damage_sound.play()
 
 
@@ -476,15 +482,19 @@ func _show_sync_effect() -> void:
 	sync_flash_tween.tween_property(sync_flash, "modulate:a", 0.0, SYNC_EFFECT_TIME)
 
 
-## 体力・影縫いのゲージ・画面ごとの表示と、無敵の間の主人公・影の半透明を GameState に合わせる。タイトルの進行と
-## 操作の案内は SaveData の保存データとキー割り当てに合わせる
+## 主人公と影の体力・影縫いのゲージ・画面ごとの表示と、無敵の間の主人公・影それぞれの半透明を GameState に合わせる。
+## タイトルの進行と操作の案内は SaveData の保存データとキー割り当てに合わせる
 func _update_hud() -> void:
-	hp_label.text = "HP %d / %d" % [game_state.hp, game_state.MAX_HP]
+	hp_label.text = "HERO HP %d / %d" % [game_state.hp[Combat.Lane.TOP], game_state.MAX_HP]
+	shadow_hp_label.text = (
+		"SHADOW HP %d / %d" % [game_state.hp[Combat.Lane.BOTTOM], game_state.MAX_HP]
+	)
 	gauge_fill.size.x = gauge_bar.size.x * game_state.gauge / game_state.MAX_GAUGE
 	var in_stage: bool = game_state.screen not in [
 		GameStateScript.Screen.TITLE, GameStateScript.Screen.SETTINGS
 	]
 	hp_label.visible = in_stage
+	shadow_hp_label.visible = in_stage
 	stage_label.visible = in_stage
 	gauge_label.visible = in_stage
 	gauge_bar.visible = in_stage
@@ -499,9 +509,8 @@ func _update_hud() -> void:
 	progress_label.text = "Cleared stages: %d" % save_data.cleared_stages.size()
 	progress_label.visible = not save_data.cleared_stages.is_empty()
 	broken_save_label.visible = save_data.loaded_broken
-	var alpha: float = INVINCIBLE_ALPHA if game_state.is_invincible() else 1.0
-	hero.modulate.a = alpha
-	shadow.modulate.a = alpha
+	hero.modulate.a = INVINCIBLE_ALPHA if game_state.is_invincible(Combat.Lane.TOP) else 1.0
+	shadow.modulate.a = INVINCIBLE_ALPHA if game_state.is_invincible(Combat.Lane.BOTTOM) else 1.0
 
 
 ## BGM をプレイ中の間だけ鳴らす。ポーズ・ゲームオーバー・ステージクリアの間は止め、プレイ中に戻ったら続きから鳴らす。
