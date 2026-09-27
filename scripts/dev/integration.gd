@@ -1,4 +1,4 @@
-extends SceneTree
+extends "res://scripts/dev/headless_check.gd"
 ## キー入力 (InputMap を通る InputEventKey) でメインシーンの主人公を動かし、地形との当たり判定・スクロール、
 ## 主人公の見た目の姿と向き、影が同じ動き・同じ攻撃・同じ姿をすること、画面ごとの敵の姿、敵を倒す・被弾・
 ## ゲームオーバー・同期ボーナスと、タイトル・ポーズ・ゲームオーバー・ステージクリア・設定の画面の遷移、昼・夕方・夜の各ステージが読み込まれて
@@ -25,8 +25,6 @@ const Main := preload("res://scripts/main.gd")
 const Hero := preload("res://scripts/hero.gd")
 ## 敵のスクリプト (体力)
 const Enemy := preload("res://scripts/enemy.gd")
-## 攻撃の画面 (Lane) とダメージ
-const Combat := preload("res://scripts/combat.gd")
 ## 画面 (Screen) の定義を持つ autoload の GameState のスクリプト
 const GameStateScript := preload("res://scripts/game_state.gd")
 ## 設定と進行の保存・読み込みを持つ autoload の SaveData のスクリプト
@@ -49,8 +47,6 @@ const MOVE_FRAME_LIMIT: int = 180
 ## 再生がリークとして WARNING / ERROR に出る (CI で実測)。ミキシング数回分に余裕を持たせた値
 const AUDIO_RELEASE_TIME: float = 0.25
 
-## 検証が 1 件でも失敗したか。true なら exit code 1 で終わる
-var failed: bool = false
 ## シーンを置いた時の主人公の位置 (scenes/main.tscn の Hero)。ステージを作り直した後の位置の期待値に使う
 var hero_start: Vector2 = Vector2.ZERO
 
@@ -132,14 +128,21 @@ func _play_from_title(main: Node2D, game_state: Node, label: String) -> void:
 	var bgm: AudioStreamPlayer = main.get_node("Audio/Bgm")
 	_check(game_state.screen == GameStateScript.Screen.TITLE, "%s: タイトルの画面になる" % label)
 	_check(main.get_node("Screens/Title").visible, "%s: タイトルが表示される" % label)
-	_check(not main.get_node("Overlay/HpLabel").visible, "%s: タイトルでは体力を表示しない" % label)
+	var hero_hp_label: Label = main.get_node("Overlay/HpLabel")
+	var shadow_hp_label: Label = main.get_node("Overlay/ShadowHpLabel")
+	_check(
+		not hero_hp_label.visible and not shadow_hp_label.visible,
+		"%s: タイトルでは主人公と影の体力を表示しない" % label
+	)
 	_check(not bgm.playing, "%s: タイトルでは BGM を鳴らさない" % label)
 	await _hold_keys([KEY_RIGHT, KEY_SPACE], 10)
 	_check(hero.position == hero_start, "%s: タイトルでは移動・ジャンプのキーで主人公が動かない" % label)
 	await _hold_keys([KEY_ENTER], 1)
 	_check(game_state.is_playing(), "%s: Enter キーでプレイが始まる" % label)
 	_check(not main.get_node("Screens/Title").visible, "%s: プレイが始まるとタイトルが消える" % label)
-	_check(main.get_node("Overlay/HpLabel").visible, "%s: プレイ中は体力を表示する" % label)
+	_check(
+		hero_hp_label.visible and shadow_hp_label.visible, "%s: プレイ中は主人公と影の体力を表示する" % label
+	)
 	_check(bgm.playing, "%s: プレイが始まると BGM が鳴る" % label)
 	await _wait_physics_frames(2)
 
@@ -193,7 +196,8 @@ func _check_retry(main: Node2D, game_state: Node) -> Node2D:
 		return null
 	_check(game_state.is_playing(), "リトライ: タイトルを経ずにプレイ中になる")
 	_check(restarted.get_node("Audio/Bgm").playing, "リトライ: 作り直したステージで BGM が鳴る")
-	_check(game_state.hp == game_state.MAX_HP, "リトライ: 体力が最大値に戻る")
+	var max_hp: int = game_state.MAX_HP
+	_check(_hp_is(game_state, max_hp, max_hp), "リトライ: 主人公と影の体力が最大値に戻る")
 	_check(not restarted.get_node("Screens/GameOver").visible, "リトライ: ゲームオーバーの表示が消える")
 	_check(_living_enemy_count(restarted) == 0, "リトライ: 敵がいなくなる")
 	var hero: Hero = restarted.get_node("Hero")
@@ -247,7 +251,10 @@ func _check_stage(main: Node2D, game_state: Node, index: int) -> Node2D:
 		_check(
 			game_state.stage_index == index + 1, "%s: Enter キーで次のステージへ進む" % label
 		)
-		_check(game_state.hp == game_state.MAX_HP, "%s: 次のステージは体力が最大値から始まる" % label)
+		_check(
+			_hp_is(game_state, game_state.MAX_HP, game_state.MAX_HP),
+			"%s: 次のステージは主人公と影の体力が最大値から始まる" % label
+		)
 	return restarted
 
 
@@ -469,32 +476,51 @@ func _check_attack_and_sync(main: Node2D) -> void:
 	)
 
 
-## 下の画面の敵が影に触れても、上の画面の敵が主人公に触れても体力が減り、0 でゲームオーバーになる
+## 下の画面の敵が影に触れると影の体力だけが、上の画面の敵が主人公に触れると主人公の体力だけが減り、被弾した体だけが
+## 半透明になる。無敵時間は体ごとに持ち、影の体力が残っていても主人公の体力が 0 になるとゲームオーバーになる
 func _check_damage_and_game_over(main: Node2D, game_state: Node) -> void:
 	var hero: Hero = main.get_node("Hero")
+	var shadow: Node2D = main.get_node("BottomLane/Shadow")
 	var damage_sound: AudioStreamPlayer = main.get_node("Audio/Damage")
 	await _wait_physics_frames(40)
-	var start_hp: int = game_state.hp
+	var hero_hp: int = game_state.hp[Combat.Lane.TOP]
+	var shadow_hp: int = game_state.hp[Combat.Lane.BOTTOM]
 	_check(not damage_sound.playing, "効果音: 敵に触れる前はダメージの効果音が鳴らない")
 	var bottom_enemy: Node2D = main.spawn_enemy(
 		Combat.Lane.BOTTOM, hero.position.x + 10.0, Stage.GROUND_Y, 0.0
 	)
 	await _wait_physics_frames(2)
-	_check(game_state.hp == start_hp - 1, "ダメージ: 下の画面の敵が影に触れると体力が減る")
+	_check(
+		_hp_is(game_state, hero_hp, shadow_hp - 1), "ダメージ: 下の画面の敵が影に触れると影の体力だけが減る"
+	)
 	_check(damage_sound.playing, "効果音: ダメージを受けるとダメージの効果音が鳴る")
+	_check(shadow.modulate.a < 1.0 and hero.modulate.a == 1.0, "ダメージ: 被弾した影だけが半透明になる")
+	var top_enemy: Node2D = main.spawn_enemy(
+		Combat.Lane.TOP, hero.position.x + 10.0, Stage.GROUND_Y, 0.0
+	)
+	await _wait_physics_frames(2)
+	_check(
+		_hp_is(game_state, hero_hp - 1, shadow_hp - 1) and hero.modulate.a < 1.0,
+		"ダメージ: 影が無敵の間も、上の画面の敵が主人公に触れると主人公の体力だけが減って半透明になる"
+	)
 	bottom_enemy.queue_free()
+	top_enemy.queue_free()
 	await _wait_physics_frames(int(game_state.INVINCIBLE_TIME * 60.0) + 10)
-	_check(game_state.hp == start_hp - 1, "ダメージ: 敵が離れれば体力は減らない")
+	_check(_hp_is(game_state, hero_hp - 1, shadow_hp - 1), "ダメージ: 敵が離れれば体力は減らない")
+	_check(
+		hero.modulate.a == 1.0 and shadow.modulate.a == 1.0,
+		"ダメージ: 無敵時間が過ぎると主人公も影も半透明から戻る"
+	)
 
 	main.spawn_enemy(Combat.Lane.TOP, hero.position.x + 10.0, Stage.GROUND_Y, 0.0)
-	await _wait_physics_frames(2)
-	_check(game_state.hp == start_hp - 2, "ダメージ: 上の画面の敵が主人公に触れると体力が減る")
-
-	var frames_left: int = int(game_state.INVINCIBLE_TIME * 60.0) * (start_hp + 1)
+	var frames_left: int = int(game_state.INVINCIBLE_TIME * 60.0) * (hero_hp + 1)
 	while not game_state.is_game_over() and frames_left > 0:
 		await physics_frame
 		frames_left -= 1
-	_check(game_state.is_game_over() and game_state.hp == 0, "ゲームオーバー: 敵に触れ続けて体力が 0 になる")
+	_check(
+		game_state.is_game_over() and _hp_is(game_state, 0, shadow_hp - 1),
+		"ゲームオーバー: 影の体力が残っていても、上の画面の敵に触れ続けて主人公の体力が 0 になる"
+	)
 	_check(main.get_node("Screens/GameOver").visible, "ゲームオーバー: ゲームオーバーの表示が出る")
 	_check(main.get_node("Audio/Bgm").stream_paused, "ゲームオーバー: BGM が止まる")
 	var over_x: float = hero.position.x
@@ -748,12 +774,6 @@ func _check_stitch_and_pull(main: Node2D, game_state: Node) -> void:
 	_check_synced(main, "ゲージ切れの後の引き寄せ後")
 
 
-## physical_keycodes (Key の配列) のキーを押す (pressed = true) / 離す (false)
-func _press_keys(physical_keycodes: Array, pressed: bool) -> void:
-	for keycode: Key in physical_keycodes:
-		Input.parse_input_event(_key_event(keycode, pressed))
-
-
 ## 攻撃キーを 1 物理フレームだけ押して離す
 func _press_attack() -> void:
 	await _hold_keys([KEY_J], 1)
@@ -961,40 +981,3 @@ func _check_terrain_mirrored(main: Node2D, stage: Stage) -> void:
 		_check(
 			bottom_rect.size == top_rect.size, "地形 (%s の %d 番目): 上下の地形が同じ大きさ" % [stage.title, i]
 		)
-
-
-## cond が false なら label を ERROR として出し、失敗として記録する
-func _check(cond: bool, label: String) -> void:
-	if not cond:
-		push_error("integration FAIL: " + label)
-		failed = true
-
-
-## physics_frames 物理フレームだけ待つ
-func _wait_physics_frames(physics_frames: int) -> void:
-	for _i: int in range(physics_frames):
-		await physics_frame
-
-
-## physical_keycodes (Key の配列) のキーを同時に押し、physics_frames 物理フレームの間押し続けてから離す。
-## while_held を渡すと、離す直前 (押している間の状態) に呼ぶ
-func _hold_keys(
-	physical_keycodes: Array, physics_frames: int, while_held: Callable = Callable()
-) -> void:
-	for keycode: Key in physical_keycodes:
-		Input.parse_input_event(_key_event(keycode, true))
-	await _wait_physics_frames(physics_frames)
-	if while_held.is_valid():
-		while_held.call()
-	for keycode: Key in physical_keycodes:
-		Input.parse_input_event(_key_event(keycode, false))
-	await physics_frame
-
-
-## physical_keycode のキーを押した (pressed = true) / 離した (false) 入力イベント
-func _key_event(physical_keycode: Key, pressed: bool) -> InputEventKey:
-	var event: InputEventKey = InputEventKey.new()
-	event.physical_keycode = physical_keycode
-	event.keycode = physical_keycode
-	event.pressed = pressed
-	return event

@@ -124,8 +124,9 @@ func _capture_walk(physical_keycode: Key, physics_frames: int, path: String) -> 
 	return captured
 
 
-## プレイ中のまま新しいメインシーンを置き (GameState の画面は前のシーンから引き継ぐ)、敵・同期ボーナス・
-## ゲームオーバーを撮ってから Enter キーでリトライする
+## プレイ中のまま新しいメインシーンを置き (GameState の画面は前のシーンから引き継ぐ)、敵・同期ボーナスと、
+## 下の画面の敵で影の体力だけを 0 にしたゲームオーバー (上の画面に主人公の体力、下の画面に影の体力が別々に写る) を
+## 撮ってから Enter キーでリトライする
 func _capture_combat() -> bool:
 	_add_main()
 	var main: Node = current_scene
