@@ -32,9 +32,6 @@ color = Color(0.2, 0.22, 0.28, 1)
 
 [node name="TopTerrain" type="Node2D" parent="."]
 
-[node name="BottomTerrain" type="Node2D" parent="."]
-position = Vector2(0, 360)
-
 [node name="Lights" type="Node2D" parent="."]
 
 [node name="Goal" type="ColorRect" parent="."]
@@ -74,15 +71,24 @@ offset_bottom = 76.0
 mouse_filter = 2
 color = Color(0.25, 0.25, 0.3, 1)
 
-[node name="Shadow" type="Node2D" parent="."]
+[node name="BottomLane" type="Node2D" parent="."]
 
-[node name="Body" type="ColorRect" parent="Shadow"]
+[node name="BottomTerrain" type="Node2D" parent="BottomLane"]
+position = Vector2(0, 360)
+
+[node name="BottomLights" type="Node2D" parent="BottomLane"]
+
+[node name="Enemies" type="Node2D" parent="BottomLane"]
+
+[node name="Shadow" type="Node2D" parent="BottomLane"]
+
+[node name="Body" type="ColorRect" parent="BottomLane/Shadow"]
 offset_right = 40.0
 offset_bottom = 64.0
 mouse_filter = 2
 color = Color(0.04, 0.04, 0.06, 1)
 
-[node name="Attack" type="ColorRect" parent="Shadow"]
+[node name="Attack" type="ColorRect" parent="BottomLane/Shadow"]
 visible = false
 offset_left = 40.0
 offset_top = 16.0
@@ -91,7 +97,7 @@ offset_bottom = 48.0
 mouse_filter = 2
 color = Color(0.5, 0.52, 0.62, 0.85)
 
-[node name="Needle" type="ColorRect" parent="Shadow"]
+[node name="Needle" type="ColorRect" parent="BottomLane/Shadow"]
 visible = false
 offset_left = 18.0
 offset_top = 40.0
