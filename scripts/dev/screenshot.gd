@@ -11,6 +11,8 @@ const Combat := preload("res://scripts/combat.gd")
 const Stage := preload("res://scripts/stage.gd")
 ## 主人公のスクリプト (体の大きさ)
 const Hero := preload("res://scripts/hero.gd")
+## 敵の種類 (Enemy.Kind)
+const Enemy := preload("res://scripts/enemy.gd")
 ## 画面 (Screen) の定義を持つ autoload の GameState のスクリプト
 const GameStateScript := preload("res://scripts/game_state.gd")
 ## 壊れた保存データの退避先の名前を持つ autoload の SaveData のスクリプト
@@ -44,7 +46,8 @@ func _run() -> void:
 
 ## 撮影する画面の並び (起動直後のタイトル → プレイ開始 → 段差の手前でジャンプした瞬間 → 段差の上 →
 ## 右へスクロールして壁の手前 → ポーズ → 左へ歩く姿 → 右へ歩く姿 → 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス →
-## 敵に触れ続けたゲームオーバー → リトライした昼のステージで光源の手前で見える反転区間の予兆 →
+## 敵に触れ続けたゲームオーバー → リトライした昼のステージで跳んだ主人公・影と同じ高さを飛ぶ上下の画面の敵 →
+## 光源の手前で見える反転区間の予兆 →
 ## 高い光源の反転区間で逆へ動いて縮んだ影の攻撃 → 影を縫い止めて主人公だけが進んだ影縫い → 引き寄せの途中 →
 ## 主人公を止めて影だけが進んだ逆の影縫い → ゴールに入ったステージクリア → 夕方のステージの開始 →
 ## 低い光源の反転区間で伸びた影の攻撃 → 夜のステージで点在する光源 → 最後のステージのクリア →
@@ -55,6 +58,7 @@ func _capture_scenes() -> bool:
 		_capture_title,
 		_capture_terrain_and_scroll,
 		_capture_combat,
+		_capture_flyer,
 		_capture_day,
 		_capture_evening,
 		_capture_night,
@@ -151,6 +155,19 @@ func _capture_combat() -> bool:
 		return false
 	await _next_scene()
 	return true
+
+
+## リトライした昼のステージで、主人公の前の上下の画面に空を飛ぶ敵を置き、跳んで最高点の近くに来た主人公・影と
+## 飛ぶ敵を撮る。飛ぶ敵は主人公に触れない (半透明になった姿を撮らない) 位置を往復させる
+func _capture_flyer() -> bool:
+	var main: Node2D = current_scene
+	await _place_hero(main, 300.0)
+	var front_x: float = main.get_node("Hero").position.x + Hero.SIZE.x + 60.0
+	for lane: Combat.Lane in [Combat.Lane.TOP, Combat.Lane.BOTTOM]:
+		main.spawn_enemy(lane, front_x, Stage.GROUND_Y, 40.0, Enemy.Kind.FLYER)
+	await _wait_physics_frames(20)
+	await _hold_keys([KEY_SPACE], 18)
+	return await _capture("tmp/screenshot-flyer.png")
 
 
 ## リトライした昼のステージで光源の予兆・高い光源の反転区間で縮んだ影の攻撃・影縫いを撮り、引き寄せで同期に
