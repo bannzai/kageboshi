@@ -113,8 +113,8 @@ var pulling: bool = false
 @onready var hero: Hero = $Hero
 ## 下の画面の影。位置は _sync_shadow() で主人公とずれから導く
 @onready var shadow: Node2D = $Shadow
-## 影の体の見た目。高さは光源の倍率で伸び縮みする
-@onready var shadow_body: ColorRect = $Shadow/Body
+## 影の体の見た目。主人公の体の見た目と同じ絵を暗く塗ったもので、高さは光源の倍率で伸び縮みする
+@onready var shadow_body: AnimatedSprite2D = $Shadow/Body
 ## 影の攻撃の見た目。主人公の攻撃から導く
 @onready var shadow_attack: ColorRect = $Shadow/Attack
 ## 影を縫い止めている間に影の足元に刺す針の見た目
@@ -361,13 +361,17 @@ func _move_shadow_offset(direction: float, delta: float) -> void:
 				game_state.recover_gauge(delta)
 
 
-## 影の位置・長さ・攻撃は、主人公と主人公がいる反転区間の光源から導いた同期中の影に、影縫いのずれを足して導く
-## (.claude/rules/shadow-position-derived-from-hero.md)
+## 影の位置・長さ・向き・姿・攻撃は、主人公と主人公がいる反転区間の光源から導いた同期中の影に、影縫いのずれを
+## 足して導く (.claude/rules/shadow-position-derived-from-hero.md)。影の体の見た目は主人公の体の見た目と同じ
+## アニメーションの同じ枚目を、影の体の矩形の足元の中央に置き、高さを矩形の高さに合わせて伸び縮みさせる
 func _sync_shadow() -> void:
 	shadow.position = shadow_position(hero.position, stage.lights) + shadow_offset
 	var body: Rect2 = shadow_body_rect(hero.position, stage.lights, shadow_offset)
-	shadow_body.position = body.position - shadow.position
-	shadow_body.size = body.size
+	shadow_body.position = Vector2(body.get_center().x, body.end.y) - shadow.position
+	shadow_body.scale = Vector2(hero.body.scale.x, hero.body.scale.y * body.size.y / Hero.SIZE.y)
+	shadow_body.flip_h = shadow_facing(hero.position, hero.facing, stage.lights) < 0.0
+	shadow_body.animation = hero.body.animation
+	shadow_body.frame = hero.body.frame
 	var attack: Rect2 = shadow_attack_area(hero.position, hero.facing, stage.lights, shadow_offset)
 	shadow_attack.visible = hero.attack_visual.visible
 	shadow_attack.position = attack.position - shadow.position
@@ -559,12 +563,19 @@ static func shadow_attack_area(
 	lights: Array[Dictionary],
 	offset: Vector2 = Vector2.ZERO
 ) -> Rect2:
-	var center_x: float = hero_position.x + Hero.SIZE.x / 2.0
 	return Hero.attack_area(
 		shadow_position(hero_position, lights) + offset,
-		hero_facing * Light.shadow_direction(center_x, lights),
-		Hero.ATTACK_REACH * Light.shadow_scale_at(center_x, lights)
+		shadow_facing(hero_position, hero_facing, lights),
+		Hero.ATTACK_REACH * Light.shadow_scale_at(hero_position.x + Hero.SIZE.x / 2.0, lights)
 	)
+
+
+## 体の左上が hero_position で hero_facing を向いている主人公の、光源が lights のステージでの影の向き
+## (-1 = 左、1 = 右)。反転区間では主人公と逆を向く
+static func shadow_facing(
+	hero_position: Vector2, hero_facing: float, lights: Array[Dictionary]
+) -> float:
+	return hero_facing * Light.shadow_direction(hero_position.x + Hero.SIZE.x / 2.0, lights)
 
 
 ## light (Stage.lights の要素) の反転区間で、影の体の中心が逆へ動く範囲の下の画面の矩形 (地面より上)。

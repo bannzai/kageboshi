@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=22 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/hero.gd" id="2_hero"]
@@ -7,9 +7,85 @@
 [ext_resource type="AudioStreamWAV" path="res://assets/audio/se_damage.wav" id="5_se_damage"]
 [ext_resource type="AudioStreamWAV" path="res://assets/audio/se_sync.wav" id="6_se_sync"]
 [ext_resource type="AudioStreamWAV" path="res://assets/audio/se_stitch.wav" id="7_se_stitch"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_idle.png" id="8_hero_idle"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_walk0.png" id="9_hero_walk0"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_walk1.png" id="10_hero_walk1"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_walk2.png" id="11_hero_walk2"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_walk3.png" id="12_hero_walk3"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_walk4.png" id="13_hero_walk4"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_walk5.png" id="14_hero_walk5"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_walk6.png" id="15_hero_walk6"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_walk7.png" id="16_hero_walk7"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_jump.png" id="17_hero_jump"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_fall.png" id="18_hero_fall"]
+[ext_resource type="Texture2D" path="res://assets/sprites/hero/character_maleAdventurer_attack0.png" id="19_hero_attack0"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_hero"]
 size = Vector2(40, 64)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_hero"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("19_hero_attack0")
+}],
+"loop": false,
+"name": &"attack",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("18_hero_fall")
+}],
+"loop": true,
+"name": &"fall",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("8_hero_idle")
+}],
+"loop": true,
+"name": &"idle",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("17_hero_jump")
+}],
+"loop": true,
+"name": &"jump",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("9_hero_walk0")
+}, {
+"duration": 1.0,
+"texture": ExtResource("10_hero_walk1")
+}, {
+"duration": 1.0,
+"texture": ExtResource("11_hero_walk2")
+}, {
+"duration": 1.0,
+"texture": ExtResource("12_hero_walk3")
+}, {
+"duration": 1.0,
+"texture": ExtResource("13_hero_walk4")
+}, {
+"duration": 1.0,
+"texture": ExtResource("14_hero_walk5")
+}, {
+"duration": 1.0,
+"texture": ExtResource("15_hero_walk6")
+}, {
+"duration": 1.0,
+"texture": ExtResource("16_hero_walk7")
+}],
+"loop": true,
+"name": &"walk",
+"speed": 15.0
+}]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -50,11 +126,13 @@ script = ExtResource("2_hero")
 position = Vector2(20, 32)
 shape = SubResource("RectangleShape2D_hero")
 
-[node name="Body" type="ColorRect" parent="Hero"]
-offset_right = 40.0
-offset_bottom = 64.0
-mouse_filter = 2
-color = Color(0.88, 0.51, 0.24, 1)
+[node name="Body" type="AnimatedSprite2D" parent="Hero"]
+position = Vector2(20, 64)
+scale = Vector2(0.6, 0.6)
+sprite_frames = SubResource("SpriteFrames_hero")
+animation = &"idle"
+autoplay = "idle"
+offset = Vector2(0, -64)
 
 [node name="Attack" type="ColorRect" parent="Hero"]
 visible = false
@@ -76,11 +154,11 @@ color = Color(0.25, 0.25, 0.3, 1)
 
 [node name="Shadow" type="Node2D" parent="."]
 
-[node name="Body" type="ColorRect" parent="Shadow"]
-offset_right = 40.0
-offset_bottom = 64.0
-mouse_filter = 2
-color = Color(0.04, 0.04, 0.06, 1)
+[node name="Body" type="AnimatedSprite2D" parent="Shadow"]
+modulate = Color(0.04, 0.04, 0.06, 1)
+sprite_frames = SubResource("SpriteFrames_hero")
+animation = &"idle"
+offset = Vector2(0, -64)
 
 [node name="Attack" type="ColorRect" parent="Shadow"]
 visible = false
