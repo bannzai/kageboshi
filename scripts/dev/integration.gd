@@ -1,6 +1,7 @@
 extends SceneTree
 ## キー入力 (InputMap を通る InputEventKey) でメインシーンの主人公を動かし、地形との当たり判定・スクロール、
-## 下の画面の影が同じ動き・同じ攻撃をすること、敵を倒す・ダメージを受ける・ゲームオーバー・同期ボーナスと、
+## 主人公の見た目の姿と向き、下の画面の影が同じ動き・同じ攻撃・同じ姿をすること、画面ごとの敵の姿、
+## 敵を倒す・ダメージを受ける・ゲームオーバー・同期ボーナスと、
 ## タイトル・ポーズ・ゲームオーバー・ステージクリア・設定の画面の遷移、昼・夕方・夜の各ステージが読み込まれて
 ## 最初の位置からゴールに着けること、ステージクリアから次のステージへ進むこと、光源をまたいだ反転区間で影の左右の
 ## 動きと攻撃の向きが逆になり、光源の高さで伸び縮みすること、影縫い・ゲージ切れ・引き寄せで上下がずれて同期に
@@ -419,6 +420,8 @@ func _check_attack_and_sync(main: Node2D) -> void:
 	_check(not attack_sound.playing, "効果音: 攻撃する前は攻撃の効果音が鳴らない")
 	await _press_attack()
 	_check(top_enemy.hp == Enemy.MAX_HP - Combat.BASE_DAMAGE, "攻撃: J キーで上の画面の目の前の敵に当たる")
+	_check_body(main, &"attack", false, "攻撃")
+	_check(top_enemy.get_node("Body").animation == &"top", "敵: 上の画面の敵は上の画面の姿")
 	_check(attack_sound.playing, "効果音: 攻撃すると攻撃の効果音が鳴る")
 	for _i: int in range(Enemy.MAX_HP - 1):
 		await _wait_physics_frames(20)
@@ -433,7 +436,8 @@ func _check_attack_and_sync(main: Node2D) -> void:
 	await _wait_physics_frames(20)
 	_check(not main.get_node("Shadow/Attack").visible, "攻撃: 攻撃が終われば影の攻撃も消える")
 	main.spawn_enemy(Combat.Lane.TOP, front_x, Stage.GROUND_Y, 0.0)
-	main.spawn_enemy(Combat.Lane.BOTTOM, front_x, Stage.GROUND_Y, 0.0)
+	var bottom_enemy: Node2D = main.spawn_enemy(Combat.Lane.BOTTOM, front_x, Stage.GROUND_Y, 0.0)
+	_check(bottom_enemy.get_node("Body").animation == &"bottom", "敵: 下の画面の敵は下の画面の姿")
 	await _press_attack()
 	_check(main.get_node("Shadow/Attack").visible, "攻撃: 同期中は影も同じ攻撃をする")
 	_check(_living_enemy_count(main) == 0, "同期: 上下で同時に当てた攻撃 1 回で上下の敵が倒れる")
@@ -534,7 +538,9 @@ func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 		"%s: 影の移動量は主人公の移動量に光源の倍率を掛けた量" % label
 	)
 	_check(
-		is_equal_approx(main.get_node("Shadow/Body").size.y, Hero.SIZE.y * scale),
+		is_equal_approx(
+			main.get_node("Shadow/Body").scale.y, main.get_node("Hero/Body").scale.y * scale
+		),
 		"%s: 影の見た目の長さが光源の倍率の分だけ伸び縮みする" % label
 	)
 	var band: Rect2 = main.shadow_reverse_range(light)
@@ -550,6 +556,10 @@ func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 	await _press_attack()
 	var attack: ColorRect = main.get_node("Shadow/Attack")
 	_check(attack.visible, "%s: 反転区間でも影が攻撃する" % label)
+	_check(
+		main.get_node("Shadow/Body").flip_h and not main.get_node("Hero/Body").flip_h,
+		"%s: 右を向いた主人公の影の見た目は左を向く" % label
+	)
 	_check(
 		attack.global_position.x + attack.size.x <= shadow.global_position.x + POSITION_TOLERANCE,
 		"%s: 右を向いた主人公の影の攻撃は影の左 (主人公と逆向き) に出る" % label
@@ -572,7 +582,7 @@ func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 	)
 	_check_synced(main, label + " の反転区間を抜けた後")
 	_check(
-		main.get_node("Shadow/Body").size == Hero.SIZE,
+		main.get_node("Shadow/Body").scale == main.get_node("Hero/Body").scale,
 		"%s: 反転区間を抜けると影の見た目の長さが主人公と同じに戻る" % label
 	)
 
@@ -755,24 +765,50 @@ func _check_move_and_jump(main: Node2D) -> void:
 	var hero: Hero = main.get_node("Hero")
 	_check(hero.is_on_floor(), "起動直後: 主人公が地面に立っている")
 	_check_synced(main, "起動直後")
+	_check_body(main, &"idle", false, "起動直後")
 
 	var before_right: float = hero.position.x
-	await _hold_keys([KEY_RIGHT], 20)
+	_press_keys([KEY_RIGHT], true)
+	await _wait_physics_frames(20)
+	_check_body(main, &"walk", false, "右キー")
+	_press_keys([KEY_RIGHT], false)
+	await physics_frame
 	_check(hero.position.x > before_right, "右キー: 主人公が右へ進む")
 	_check_synced(main, "右キー")
 
 	var before_left: float = hero.position.x
-	await _hold_keys([KEY_A], 10)
+	_press_keys([KEY_A], true)
+	await _wait_physics_frames(10)
+	_check_body(main, &"walk", true, "A キー")
+	_press_keys([KEY_A], false)
+	await physics_frame
 	_check(hero.position.x < before_left, "A キー: 主人公が左へ進む")
 	_check_synced(main, "A キー")
 
 	await _hold_keys([KEY_SPACE], 3)
 	_check(not hero.is_on_floor(), "スペースキー: 主人公がジャンプして地面から離れる")
 	_check_synced(main, "ジャンプ中")
+	_check_body(main, &"jump", true, "ジャンプ中")
 
 	await _wait_physics_frames(60)
 	_check(hero.is_on_floor(), "ジャンプ後: 主人公が地面に戻る")
 	_check_synced(main, "着地後")
+	_check_body(main, &"idle", true, "着地後")
+
+
+## 主人公の体の見た目が animation の姿で、flipped なら左を・そうでなければ右を向き、影の見た目も同じ姿で同じ向き
+## (反転区間の外)。影の枚目は主人公の再生から物理フレームごとに写すため、描画のフレームとずれ得るので比べない
+func _check_body(main: Node2D, animation: StringName, flipped: bool, label: String) -> void:
+	var hero_body: AnimatedSprite2D = main.get_node("Hero/Body")
+	var shadow_body: AnimatedSprite2D = main.get_node("Shadow/Body")
+	_check(
+		hero_body.animation == animation and hero_body.flip_h == flipped,
+		"%s: 主人公の見た目が %s の姿で%sを向く" % [label, animation, "左" if flipped else "右"]
+	)
+	_check(
+		shadow_body.animation == animation and shadow_body.flip_h == flipped,
+		"%s: 影の見た目が主人公と同じ姿・同じ向き" % label
+	)
 
 
 ## 段差の側面で止まる → ジャンプで段差に乗る → 右へ進んで壁の手前の段で止まる。その間スクロールしても上下の対応が
