@@ -2,7 +2,7 @@ extends RefCounted
 ## 空を飛ぶ敵の揺れ・見た目と、各ステージの空を飛ぶ敵の置き方の検証。scripts/dev/selfcheck.gd が run() を呼び、
 ## 返した失敗の内容を ERROR として出す。
 
-## 同期中の影の体の矩形 (反転区間で伸び縮みする影の体)
+## 同期中の影の体の矩形 (光源の影響範囲で伸び縮みする影の体)
 const Main := preload("res://scripts/main.gd")
 ## 主人公の体の大きさ・ジャンプの最高点・攻撃の範囲
 const Hero := preload("res://scripts/hero.gd")
@@ -79,7 +79,7 @@ func _check_animations() -> void:
 
 ## stage の上の画面と下の画面の両方に飛ぶ敵がいて、各飛ぶ敵は地形とその上に立つ主人公・影に触れず、跳んだ
 ## 最高点での攻撃が届いて地面に立ったままの攻撃は届かず、同じ画面の地上の敵と往復の範囲が重ならない。
-## 地面のどこに立った主人公・影 (反転区間で伸びた影を含む) も飛ぶ敵に触れない
+## 地面のどこに立った主人公・影 (光源の影響範囲で伸びた影を含む) も飛ぶ敵に触れない
 func _check_stage_flyers(stage: Stage) -> void:
 	var lanes: Array[int] = []
 	for spawn: Dictionary in stage.spawns:
@@ -133,7 +133,7 @@ func _check_reach(floor_y: float, area: Rect2, label: String) -> void:
 	)
 
 
-## stage の地面のどこに立った主人公・影 (反転区間で伸び縮みした影を含む) の体も、spawn の飛ぶ敵が往復と揺れで
+## stage の地面のどこに立った主人公・影 (光源の影響範囲で伸び縮みした影を含む) の体も、spawn の飛ぶ敵が往復と揺れで
 ## 通る範囲 area (上の画面の座標) に触れない。label は失敗した時に出す飛ぶ敵の名前
 func _check_standing(stage: Stage, spawn: Dictionary, area: Rect2, label: String) -> void:
 	var lane_area: Rect2 = area

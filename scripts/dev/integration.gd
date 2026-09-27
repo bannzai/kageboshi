@@ -3,8 +3,9 @@ extends "res://scripts/dev/headless_check.gd"
 ## 主人公の見た目の姿と向き、影が同じ動き・同じ攻撃・同じ姿をすること、画面ごとの敵の姿、敵を倒す・被弾・
 ## ゲームオーバー・同期ボーナス、空を飛ぶ敵にジャンプ中の攻撃が当たって倒れることと触れると被弾することと、
 ## タイトル・ポーズ・ゲームオーバー・ステージクリア・設定の画面の遷移、昼・夕方・夜の各ステージが読み込まれて
-## 最初の位置からゴールに着けること、ステージクリアから次のステージへ進むこと、光源をまたいだ反転区間で影の左右の
-## 動きと攻撃の向きが逆になり、光源の高さで伸び縮みすること、影縫い・ゲージ切れ・引き寄せで上下がずれて同期に
+## 最初の位置からゴールに着けること、ステージクリアから次のステージへ進むこと、光源の影響範囲で影の足元は主人公と
+## 同期したまま、影の体と攻撃が光源から遠ざかる向きに光源の高さの倍率で伸び縮みし、影響範囲を抜けると戻ること、
+## 影縫い・ゲージ切れ・引き寄せで上下がずれて同期に
 ## 戻ること、クリアしたステージの保存、設定画面での音量とキー割り当ての変更と保存、BGM がプレイ中の間だけ鳴って
 ## ポーズ・ゲームオーバーで止まることと、攻撃・ダメージ・同期ボーナス・影縫いで効果音が鳴ること、下の画面 (影・地形) が
 ## 仕切り線をはさんで上の画面と上下対称に描かれることを検証する。
@@ -201,7 +202,7 @@ func _check_retry(main: Node2D, game_state: Node) -> Node2D:
 	return restarted
 
 
-## プレイ中の index 番目のステージのメインシーン main で、そのステージが読み込まれていること・光源の反転区間の
+## プレイ中の index 番目のステージのメインシーン main で、そのステージが読み込まれていること・光源の影響範囲の
 ## 影を確かめてから、最初の位置からゴールに着いてステージクリアになり、操作を受け付けないことを確かめる。
 ## Enter キーで次のステージ (最後のステージならタイトル) へ移り、読み込み直されたメインシーンを返す
 func _check_stage(main: Node2D, game_state: Node, index: int) -> Node2D:
@@ -218,7 +219,7 @@ func _check_stage(main: Node2D, game_state: Node, index: int) -> Node2D:
 		bgm.playing and bgm.stream == StageBgm.STAGE_BGM[stage.id], "%s: ステージの BGM が鳴る" % label
 	)
 	for light: Dictionary in stage.lights:
-		await _check_light_reversal(main, light)
+		await _check_light_stretch(main, light)
 	await _run_to_goal(main, game_state, stage, label)
 	_check(main.get_node("Screens/Clear").visible, "%s: ステージクリアの表示が出る" % label)
 	_check(bgm.stream_paused, "%s: ステージクリアで BGM が止まる" % label)
@@ -568,32 +569,69 @@ func _check_damage_and_game_over(main: Node2D, game_state: Node) -> void:
 	_check(absf(hero.position.x - over_x) < POSITION_TOLERANCE, "ゲームオーバー: 操作を受け付けない")
 
 
-## light (遊んでいるステージの Stage.lights の要素) の手前から右キーで進むと、光源をまたいだ反転区間で影だけが左へ、光源の倍率の分だけ
-## 動き、左キーでは影が右へ動く。反転区間では影の攻撃が主人公と逆向きに倍率のリーチで出て、影の後ろ (左) にいる
-## 下の画面の敵に当たる。反転区間を抜けると影が主人公の真下に戻る
-func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
+## light (遊んでいるステージの Stage.lights の要素) の影響範囲の手前から右キーで進むと、光源の左側・右側のどちらでも
+## 影の足元は主人公の真下のまま同じ動きをし、影の体が光源の倍率の分だけ伸び縮みして描かれる。影の攻撃は主人公と
+## 同じ向きに出て、光源から遠ざかる向き (左側では左、右側では右) の時だけリーチが倍率の分だけ伸び縮みし、右側では
+## 前 (右) の下の画面の敵に倍率のリーチの分だけ届く。影響範囲を抜けると影が主人公と同じ長さに戻る
+func _check_light_stretch(main: Node2D, light: Dictionary) -> void:
 	var hero: Hero = main.get_node("Hero")
 	var shadow: Node2D = main.get_node("BottomLane/Shadow")
-	var shadow_body: AnimatedSprite2D = main.get_node("BottomLane/Shadow/Body")
-	var hero_body: AnimatedSprite2D = hero.get_node("Body")
 	var label: String = "光源 (%s の x = %d)" % [main.stage.title, int(light["x"])]
 	var scale: float = Light.shadow_scale(light["height"])
-	hero.position = Vector2(light["x"] - 80.0 - Hero.SIZE.x / 2.0, Stage.GROUND_Y - Hero.SIZE.y)
+	hero.position = Vector2(
+		light["x"] - light["zone"] - Hero.SIZE.x / 2.0, Stage.GROUND_Y - Hero.SIZE.y
+	)
 	hero.velocity = Vector2.ZERO
 	await _wait_physics_frames(3)
 	_clear_enemies(main)
 	_check_synced(main, label + " の手前")
 
-	await _hold_key_until(KEY_RIGHT, func() -> bool: return _center_x(hero) >= light["x"] + 20.0)
-	var hero_x: float = hero.position.x
-	var shadow_x: float = shadow.position.x
-	await _hold_keys([KEY_RIGHT], 6)
-	_check(hero.position.x > hero_x, "%s: 反転区間で右キーを押すと主人公は右へ進む" % label)
-	_check(shadow.position.x < shadow_x, "%s: 反転区間で右キーを押すと影は左へ進む" % label)
-	_check(
-		is_equal_approx(shadow_x - shadow.position.x, (hero.position.x - hero_x) * scale),
-		"%s: 影の移動量は主人公の移動量に光源の倍率を掛けた量" % label
+	await _hold_key_until(
+		KEY_RIGHT, func() -> bool: return _center_x(hero) >= light["x"] - light["zone"] / 2.0
 	)
+	_check_stretched(main, scale, label + " の左側")
+	await _check_shadow_attack(main, 1.0, 1.0, label + " の左側で光源に近づく向き (右)")
+	await _hold_keys([KEY_LEFT], 1)
+	await _check_shadow_attack(main, -1.0, scale, label + " の左側で光源から遠ざかる向き (左)")
+
+	await _hold_key_until(
+		KEY_RIGHT, func() -> bool: return _center_x(hero) >= light["x"] + light["zone"] / 2.0
+	)
+	_check_stretched(main, scale, label + " の右側")
+	var gap: float = Hero.ATTACK_REACH * (1.0 + scale) / 2.0
+	var front: Enemy = main.spawn_enemy(
+		Combat.Lane.BOTTOM, shadow.position.x + Hero.SIZE.x + gap, Stage.GROUND_Y, 0.0
+	)
+	await _check_shadow_attack(main, 1.0, scale, label + " の右側で光源から遠ざかる向き (右)")
+	var reached: bool = scale > 1.0
+	_check(
+		front.hp == Enemy.MAX_HP - (Combat.BASE_DAMAGE if reached else 0),
+		(
+			"%s: 右側の影の攻撃は、前の下の画面の敵 (影の前端から %.1f px) に%s"
+			% [label, gap, "伸びたリーチで届く" if reached else "縮んだリーチでは届かない"]
+		)
+	)
+	front.queue_free()
+
+	await _hold_key_until(
+		KEY_RIGHT, func() -> bool: return _center_x(hero) >= light["x"] + light["zone"] + 10.0
+	)
+	_check_synced(main, label + " の影響範囲を抜けた後 (影の見た目の長さが主人公と同じに戻る)")
+	await _check_shadow_attack(main, 1.0, 1.0, label + " の影響範囲を抜けた後")
+
+
+## 光源の影響範囲にいる main の影の足元が主人公の真下 (上の画面 1 つ分下) にあり、影の体が主人公と同じ向きで、
+## 見た目の長さが scale 倍になって、主人公の足元と仕切り線をはさんで対称な足元から下へ伸びて描かれる
+func _check_stretched(main: Node2D, scale: float, label: String) -> void:
+	var hero: Hero = main.get_node("Hero")
+	var shadow: Node2D = main.get_node("BottomLane/Shadow")
+	var shadow_body: AnimatedSprite2D = shadow.get_node("Body")
+	var hero_body: AnimatedSprite2D = hero.get_node("Body")
+	_check(
+		shadow.position == hero.position + Vector2(0.0, Main.SCREEN_HEIGHT),
+		"%s: 影の足元が主人公の真下にいる" % label
+	)
+	_check(shadow_body.flip_h == hero_body.flip_h, "%s: 影が主人公と同じ向きを向く" % label)
 	_check(
 		is_equal_approx(shadow_body.scale.y, hero_body.scale.y * scale),
 		"%s: 影の見た目の長さが光源の倍率の分だけ伸び縮みする" % label
@@ -602,49 +640,35 @@ func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 	var hero_drawn: Rect2 = _drawn_rect(hero_body)
 	_check(
 		(
-			is_equal_approx(drawn.position.y, _mirrored(hero_drawn).position.y)
+			is_equal_approx(drawn.position.x, hero_drawn.position.x)
+			and is_equal_approx(drawn.size.x, hero_drawn.size.x)
+			and is_equal_approx(drawn.position.y, _mirrored(hero_drawn).position.y)
 			and is_equal_approx(drawn.size.y, hero_drawn.size.y * scale)
 		),
-		"%s: 伸び縮みした影も主人公の足元と仕切り線をはさんで対称な足元から下へ伸びて描かれる" % label
-	)
-	var reverse_range: Rect2 = main.shadow_reverse_range(light)
-	var shadow_center: float = shadow.position.x + Hero.SIZE.x / 2.0
-	_check(
-		reverse_range.position.x <= shadow_center and shadow_center <= reverse_range.end.x,
-		"%s: 反転区間の影は光源から左へ反転区間の幅に倍率を掛けた範囲にいる" % label
+		"%s: 伸び縮みした影も主人公の真下の、仕切り線をはさんで対称な足元から下へ伸びて描かれる" % label
 	)
 
-	var behind: Node2D = main.spawn_enemy(
-		Combat.Lane.BOTTOM, shadow.position.x - Enemy.SIZE.x - 4.0, Stage.GROUND_Y, 0.0
-	)
+
+## 攻撃のクールダウンが終わるまで待って攻撃キーを押し、main の主人公が facing を向いていて、影の攻撃が影の体から
+## 同じ向きに、主人公のリーチの reach_scale 倍の幅で出ることを確かめる
+func _check_shadow_attack(main: Node2D, facing: float, reach_scale: float, label: String) -> void:
+	var hero: Hero = main.get_node("Hero")
+	var shadow: Node2D = main.get_node("BottomLane/Shadow")
+	var attack: ColorRect = shadow.get_node("Attack")
+	for _i: int in range(MOVE_FRAME_LIMIT):
+		if hero.attack_cooldown_left <= 0.0:
+			break
+		await physics_frame
 	await _press_attack()
-	var attack: ColorRect = main.get_node("BottomLane/Shadow/Attack")
-	_check(attack.visible, "%s: 反転区間でも影が攻撃する" % label)
-	_check(shadow_body.flip_h and not hero_body.flip_h, "%s: 右を向いた主人公の影は左を向く" % label)
+	_check(attack.visible, "%s: 影が攻撃する" % label)
+	_check(hero.facing == facing, "%s: 主人公が%sを向いている" % [label, "左" if facing < 0.0 else "右"])
+	var expected: Rect2 = Hero.attack_area(shadow.position, facing, Hero.ATTACK_REACH * reach_scale)
 	_check(
-		attack.global_position.x + attack.size.x <= shadow.global_position.x + POSITION_TOLERANCE,
-		"%s: 右を向いた主人公の影の攻撃は影の左 (主人公と逆向き) に出る" % label
-	)
-	_check(
-		is_equal_approx(attack.size.x, Hero.ATTACK_REACH * scale),
-		"%s: 影の攻撃のリーチが光源の倍率の分だけ伸び縮みする" % label
-	)
-	_check(behind.hp == Enemy.MAX_HP - Combat.BASE_DAMAGE, "%s: 影の後ろ (左) の下の画面の敵に当たる" % label)
-	behind.queue_free()
-
-	hero_x = hero.position.x
-	shadow_x = shadow.position.x
-	await _hold_keys([KEY_LEFT], 6)
-	_check(hero.position.x < hero_x, "%s: 反転区間で左キーを押すと主人公は左へ進む" % label)
-	_check(shadow.position.x > shadow_x, "%s: 反転区間で左キーを押すと影は右へ進む" % label)
-
-	await _hold_key_until(
-		KEY_RIGHT, func() -> bool: return _center_x(hero) >= light["x"] + light["zone"] + 10.0
-	)
-	_check_synced(main, label + " の反転区間を抜けた後")
-	_check(
-		shadow_body.scale == hero_body.scale,
-		"%s: 反転区間を抜けると影の見た目の長さが主人公と同じに戻る" % label
+		Rect2(shadow.position + attack.position, attack.size).is_equal_approx(expected),
+		(
+			"%s: 影の攻撃が主人公と同じ向きに、主人公の %.2f 倍のリーチで出る (幅 %.1f)"
+			% [label, reach_scale, attack.size.x]
+		)
 	)
 
 
@@ -659,7 +683,7 @@ func _center_x(hero: Hero) -> float:
 	return hero.position.x + Hero.SIZE.x / 2.0
 
 
-## 主人公を最初の位置 (光源の反転区間の外) に戻してから、ポーズ中は K キーの影縫いを受け付けないこと、
+## 主人公を最初の位置 (光源の影響範囲の外) に戻してから、ポーズ中は K キーの影縫いを受け付けないこと、
 ## K キーで影を縫い止めて主人公だけが動き、離してもずれたまま主人公と同じ動きをして、I キーの引き寄せで
 ## 同期に戻ることを確かめる。L キーで主人公を止めて影だけが動き、その最中の引き寄せでも同期に戻る。
 ## 縫い止め続けるとゲージが切れて解除される
@@ -816,7 +840,7 @@ func _check_move_and_jump(main: Node2D) -> void:
 	_check_body(main, &"idle", true, "着地後")
 
 
-## 主人公と影の体の見た目が animation の姿の同じ枚目で、flipped なら左を・そうでなければ右を向く (反転区間の外)
+## 主人公と影の体の見た目が animation の姿の同じ枚目で、flipped なら左を・そうでなければ右を向く
 func _check_body(main: Node2D, animation: StringName, flipped: bool, label: String) -> void:
 	var frame: int = main.get_node("Hero/Body").frame
 	for path: String in ["Hero/Body", "BottomLane/Shadow/Body"]:

@@ -45,9 +45,9 @@ func _run() -> void:
 ## 右へスクロールして壁の手前 → ポーズ → 左へ歩く姿 → 右へ歩く姿 → 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス →
 ## 敵に触れ続けたゲームオーバー → リトライした昼のステージで跳んだ主人公・影と同じ高さを飛ぶ上下の画面の敵 →
 ## 光源の手前から見える上の画面の光 →
-## 高い光源の反転区間で逆へ動いて縮んだ影の攻撃 → 影を縫い止めて主人公だけが進んだ影縫い → 引き寄せの途中 →
-## 主人公を止めて影だけが進んだ逆の影縫い → ゴールに入ったステージクリア → 夕方のステージの開始 →
-## 低い光源の反転区間で伸びた影の攻撃 → 夜のステージで点在する光源 → 最後のステージのクリア →
+## 高い光源の右側の影響範囲で光源から遠ざかる向きに縮んだ影の体と攻撃 → 影を縫い止めて主人公だけが進んだ影縫い →
+## 引き寄せの途中 → 主人公を止めて影だけが進んだ逆の影縫い → ゴールに入ったステージクリア → 夕方のステージの開始 →
+## 低い光源の右側の影響範囲で光源から遠ざかる向きに伸びた影の体と攻撃 → 夜のステージで点在する光源 → 最後のステージのクリア →
 ## クリアを保存したタイトル → 設定画面 → キーを待つ設定画面 → 壊れた保存データを既定値に戻したタイトル)。
 ## 失敗した撮影は _capture() が quit(1) 済みなので、false を受けたらそのまま抜ける。
 func _capture_scenes() -> bool:
@@ -168,15 +168,16 @@ func _capture_flyer() -> bool:
 	return await _capture("tmp/screenshot-flyer.png")
 
 
-## リトライした昼のステージで光源の手前から見える上の画面の光・高い光源の反転区間で縮んだ影の攻撃・影縫いを撮り、
-## 引き寄せで同期に戻してから、ゴールに入ったステージクリアを撮る
+## リトライした昼のステージで影響範囲の手前から見える上の画面の光・高い光源の右側の影響範囲まで右へ歩いて縮んだ
+## 影の体と攻撃・影縫いを撮り、引き寄せで同期に戻してから、ゴールに入ったステージクリアを撮る
 func _capture_day() -> bool:
 	var main: Node2D = current_scene
 	var high: Dictionary = main.stage.lights[0]
-	await _place_hero(main, high["x"] - 130.0)
+	await _place_hero(main, high["x"] - high["zone"])
 	if not await _capture("tmp/screenshot-light-omen.png"):
 		return false
-	await _hold_keys([KEY_RIGHT], 47)
+	var walk: float = high["zone"] * 1.5
+	await _hold_keys([KEY_RIGHT], ceili(walk / Hero.MOVE_SPEED * Engine.physics_ticks_per_second))
 	if not await _capture_attack(main, "tmp/screenshot-light-reverse.png"):
 		return false
 	if not await _capture_stitch(main):
@@ -186,8 +187,8 @@ func _capture_day() -> bool:
 	return await _capture_clear(main, "tmp/screenshot-clear.png")
 
 
-## ステージクリアから Enter キーで進んだ夕方のステージの開始と、低い光源の反転区間で伸びた影の攻撃を撮り、
-## ゴールまで進める
+## ステージクリアから Enter キーで進んだ夕方のステージの開始と、低い光源の右側の影響範囲で右を向いた主人公の
+## 光源から遠ざかる向きに伸びた影の体と攻撃を撮り、ゴールまで進める
 func _capture_evening() -> bool:
 	var main: Node2D = await _next_scene()
 	await create_timer(0.2).timeout
@@ -205,7 +206,7 @@ func _capture_evening() -> bool:
 func _capture_night() -> bool:
 	var main: Node2D = await _next_scene()
 	var second: Dictionary = main.stage.lights[1]
-	await _place_hero(main, second["x"] - 130.0)
+	await _place_hero(main, second["x"] - second["zone"])
 	if not await _capture("tmp/screenshot-stage-night.png"):
 		return false
 	return await _capture_clear(main, "tmp/screenshot-clear-last.png")
@@ -287,7 +288,7 @@ func _remove_save_files(path: String) -> void:
 			DirAccess.remove_absolute(file)
 
 
-## 主人公を光源の反転区間の外 (ステージの左の平らな所) に置き、影縫い・引き寄せの途中・逆の影縫いを撮る
+## 主人公を光源の影響範囲の外 (ステージの左の平らな所) に置き、影縫い・引き寄せの途中・逆の影縫いを撮る
 func _capture_stitch(main: Node2D) -> bool:
 	await _place_hero(main, 220.0)
 	await _wait_physics_frames(20)

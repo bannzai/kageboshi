@@ -6,7 +6,7 @@ extends "res://scripts/dev/game_driver.gd"
 ## 体力を持つ体を表す画面 (上の画面は主人公、下の画面は影)
 const Combat := preload("res://scripts/combat.gd")
 ## キーを押し続けて主人公を目標の位置まで動かす時の、待つ物理フレーム数の上限。移動の速さ (320 px/秒) で
-## 反転区間 (200 px) を抜けるのにかかる約 40 フレームに余裕を持たせる
+## 光源の影響範囲 (左右 150 px ずつ) を抜けるのにかかる約 60 フレームに余裕を持たせる
 const MOVE_FRAME_LIMIT: int = 180
 
 ## 検証が 1 件でも失敗したか。true なら exit code 1 で終わる

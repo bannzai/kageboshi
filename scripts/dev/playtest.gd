@@ -3,7 +3,7 @@ extends "res://scripts/dev/game_driver.gd"
 ## 描画付きで起動して movie maker で録画し、agent が録画と静止画を目視して問題を探す (実行方法は AGENTS.md を参照)。
 ## ゴールまでは scripts/dev/integration.gd と同じ入力の経路 (_walk_to_goal()) で進み、各ステージの最初に影縫いと
 ## 引き寄せを使い、攻撃が届く敵がいれば止まって攻撃し、前に敵がいれば跳ばずに歩いて近づき、倒しながら進む。
-## タイトル・ステージごとの開始・影縫い・光源の反転区間・敵との戦闘・同期ボーナス・ゲームオーバー・クリアの時点を
+## タイトル・ステージごとの開始・影縫い・光源の影響範囲・敵との戦闘・同期ボーナス・ゲームオーバー・クリアの時点を
 ## tmp/playtest-<ステージの番号>-<ステージの名前>-<場面>.png に撮る。録画の末尾が ALL CLEAR の画面になるよう、最後の
 ## ステージのクリアの画面のまま終わる。ゲームオーバーはログに残してリトライし、1 ステージで MAX_RETRIES 回を超えるか、
 ## ゴールに着けなければ quit(1) で終わる。
@@ -19,7 +19,7 @@ const Stages := preload("res://scripts/stages.gd")
 const Hero := preload("res://scripts/hero.gd")
 ## 敵のスクリプト (出現している画面と体の矩形)
 const Enemy := preload("res://scripts/enemy.gd")
-## 光源の反転区間の計算
+## 光源の影響範囲の計算
 const Light := preload("res://scripts/light.gd")
 ## 体力を持つ体を表す画面 (上の画面は主人公、下の画面は影)
 const Combat := preload("res://scripts/combat.gd")
@@ -204,7 +204,8 @@ func _release_attack() -> void:
 		attack_held = false
 
 
-## 主人公の体の中心が光源の反転区間の中ほどを過ぎていれば、その光源の反転区間を 1 度だけ撮る
+## 主人公の体の中心が光源の右側の影響範囲の中ほどを過ぎていれば (右へ進む主人公の影の体と攻撃が光源から遠ざかる
+## 向きに伸びている)、その光源の影響範囲を 1 度だけ撮る
 func _capture_light(main: Node2D, prefix: String) -> void:
 	var center_x: float = main.get_node("Hero").position.x + Hero.SIZE.x / 2.0
 	var light: Dictionary = Light.active_light(center_x, main.stage.lights)
@@ -234,16 +235,11 @@ func _enemy_ahead(main: Node2D) -> bool:
 	var bodies: Array[Rect2] = [
 		hero.body_rect(), main.shadow_body_rect(hero.position, lights, main.shadow_offset)
 	]
-	var facings: Array[float] = [
-		hero.facing, main.shadow_facing(hero.position, hero.facing, lights)
-	]
 	for enemy: Enemy in _living_enemies(main):
 		var body: Rect2 = bodies[enemy.lane]
 		var target: Rect2 = enemy.body_rect()
 		var gap: float = (
-			target.position.x - body.end.x
-			if facings[enemy.lane] > 0.0
-			else body.position.x - target.end.x
+			target.position.x - body.end.x if hero.facing > 0.0 else body.position.x - target.end.x
 		)
 		if gap >= 0.0 and gap <= ENGAGE_DISTANCE:
 			return true
