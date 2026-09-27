@@ -18,8 +18,16 @@ const DAY_OBSTACLES: Array[Rect2] = [
 	Rect2(1400.0, 160.0, 60.0, 160.0),
 	Rect2(1900.0, 272.0, 240.0, 48.0),
 ]
-## 昼の敵の出現位置。空を飛ぶ敵は、下の画面は壁の先の平らな所、上の画面は x = 1900 の段差の上に置く
+## 昼の敵の出現位置。空を飛ぶ敵は、下の画面は壁の先の平らな所、上の画面は x = 1900 の段差の上に置く。
+## 低く飛ぶ敵は下の画面の 1 本目の光源の右側に置き、縮んだ影にくぐらせる
 const DAY_SPAWNS: Array[Dictionary] = [
+	{
+		"x": 1020.0,
+		"floor_y": Stage.GROUND_Y,
+		"lane": Combat.Lane.BOTTOM,
+		"patrol": 60.0,
+		"kind": Enemy.Kind.LOW_FLYER,
+	},
 	{
 		"x": 1660.0,
 		"floor_y": Stage.GROUND_Y,
@@ -55,7 +63,8 @@ const EVENING_OBSTACLES: Array[Rect2] = [
 	Rect2(1380.0, 176.0, 80.0, 144.0),
 	Rect2(2640.0, 264.0, 120.0, 56.0),
 ]
-## 夕方の敵の出現位置。空を飛ぶ敵は、下の画面は x = 900 の段差の手前、上の画面はその段差の上に置く
+## 夕方の敵の出現位置。空を飛ぶ敵は、下の画面は x = 900 の段差の手前、上の画面はその段差の上に置く。
+## x = 2050 の下の画面の地面を歩く敵は 1 本目の光源の右側に置き、伸びた影の股の下を通らせる
 const EVENING_SPAWNS: Array[Dictionary] = [
 	{
 		"x": 860.0,
@@ -73,6 +82,7 @@ const EVENING_SPAWNS: Array[Dictionary] = [
 	},
 	{"x": 1180.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 60.0},
 	{"x": 1700.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 160.0},
+	{"x": 2050.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 60.0},
 	{"x": 2300.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 120.0},
 	{"x": 2980.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 180.0},
 	{"x": 2980.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 180.0},
@@ -93,7 +103,8 @@ const NIGHT_OBSTACLES: Array[Rect2] = [
 	Rect2(3100.0, 256.0, 160.0, 64.0),
 ]
 ## 夜の敵の出現位置。空を飛ぶ敵は、下の画面は x = 500 の段差の上から最初の光源の手前まで、上の画面は x = 1780 の
-## 段差の上に置く
+## 段差の上に置く。下の画面の 2 本目 (低い松明) の光源の右側に地面を歩く敵を置いて伸びた影の股の下を通らせ、
+## 3 本目 (高い街灯) の光源の右側に低く飛ぶ敵を置いて縮んだ影にくぐらせる
 const NIGHT_SPAWNS: Array[Dictionary] = [
 	{
 		"x": 700.0,
@@ -103,6 +114,7 @@ const NIGHT_SPAWNS: Array[Dictionary] = [
 		"kind": Enemy.Kind.FLYER,
 	},
 	{"x": 1100.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 40.0},
+	{"x": 1540.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 50.0},
 	{"x": 1720.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 40.0},
 	{
 		"x": 1868.0,
@@ -110,6 +122,13 @@ const NIGHT_SPAWNS: Array[Dictionary] = [
 		"lane": Combat.Lane.TOP,
 		"patrol": 88.0,
 		"kind": Enemy.Kind.FLYER,
+	},
+	{
+		"x": 2270.0,
+		"floor_y": Stage.GROUND_Y,
+		"lane": Combat.Lane.BOTTOM,
+		"patrol": 50.0,
+		"kind": Enemy.Kind.LOW_FLYER,
 	},
 	{"x": 2500.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 100.0},
 	{"x": 2500.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 100.0},
