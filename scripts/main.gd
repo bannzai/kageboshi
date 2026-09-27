@@ -199,6 +199,8 @@ func _ready() -> void:
 	_build_terrain()
 	_build_lights()
 	_sync_shadow()
+	# 主人公の絵は物理フレームの外 (process) で枚目が進むため、進んだ時にも影へ写して描画のずれを無くす
+	hero.body.frame_changed.connect(_sync_shadow)
 	_follow_camera()
 	_update_hud()
 

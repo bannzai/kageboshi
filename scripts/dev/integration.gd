@@ -803,14 +803,14 @@ func _check_move_and_jump(main: Node2D) -> void:
 	_check_body(main, &"idle", true, "着地後")
 
 
-## 主人公の体の見た目が animation の姿で、flipped なら左を・そうでなければ右を向き、影の見た目も同じ姿で同じ向き
-## (反転区間の外)。影の枚目は主人公の再生から物理フレームごとに写すため、描画のフレームとずれ得るので比べない
+## 主人公と影の体の見た目が animation の姿の同じ枚目で、flipped なら左を・そうでなければ右を向く (反転区間の外)
 func _check_body(main: Node2D, animation: StringName, flipped: bool, label: String) -> void:
+	var frame: int = main.get_node("Hero/Body").frame
 	for path: String in ["Hero/Body", "BottomLane/Shadow/Body"]:
 		var body: AnimatedSprite2D = main.get_node(path)
 		_check(
-			body.animation == animation and body.flip_h == flipped,
-			"%s: %s が %s の姿で%sを向く" % [label, path, animation, "左" if flipped else "右"]
+			body.animation == animation and body.flip_h == flipped and body.frame == frame,
+			"%s: %s が %s の姿の %d 枚目で%sを向く" % [label, path, animation, frame, "左" if flipped else "右"]
 		)
 
 
