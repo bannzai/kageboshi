@@ -98,16 +98,17 @@ movie: import
 
 # タイトルから全ステージを ALL CLEAR まで通して遊ぶテストプレイを Movie Maker モードで録画して mp4 にし、ステージごとの
 # 開始・光源の反転区間・敵との戦闘・クリアの時点の静止画 tmp/playtest-*.png を書き出す。録画と静止画は目視して問題を
-# 探す (AGENTS.md「検証方法」)
+# 探す (AGENTS.md「検証方法」)。進めなくなった・ゲームオーバーを繰り返したなど失敗した時ほど録画で原因を見るため、
+# 成否の検査より先に mp4 へ変換する
 playtest: import
 	rm -f $(LOG_DIR)/playtest.avi $(LOG_DIR)/playtest.mp4 $(LOG_DIR)/playtest-*.png
 	"$(GODOT)" $(ENGINE_LOG) --path . $(WINDOWED_FLAGS) --write-movie $(LOG_DIR)/playtest.avi --fixed-fps 30 --quit-after $(PLAYTEST_FRAME_LIMIT) --script res://scripts/dev/playtest.gd > $(LOG_DIR)/playtest.log 2>&1; \
-	echo "exit=$$?" >> $(LOG_DIR)/playtest.log; \
+	echo "exit=$$?" >> $(LOG_DIR)/playtest.log
+	ffmpeg -loglevel error -y -i $(LOG_DIR)/playtest.avi -c:v libx264 -pix_fmt yuv420p $(LOG_DIR)/playtest.mp4
+	rm -f $(LOG_DIR)/playtest.avi
 	grep -q '^playtest OK$$' $(LOG_DIR)/playtest.log
 	tail -n 1 $(LOG_DIR)/playtest.log | grep -q '^exit=0$$'
 	! grep -i -e 'WARNING' -e 'ERROR' $(LOG_DIR)/playtest.log | grep -v $(WINDOWED_LOG_NOISE) | grep -q .
-	ffmpeg -loglevel error -y -i $(LOG_DIR)/playtest.avi -c:v libx264 -pix_fmt yuv420p $(LOG_DIR)/playtest.mp4
-	rm -f $(LOG_DIR)/playtest.avi
 	ls $(LOG_DIR)/playtest-*.png
 
 # エディタなしでゲームを起動する (手動確認用)。先にアセットをインポートする (.godot/ が無い初回や素材の追加後に、
