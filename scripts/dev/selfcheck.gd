@@ -1,7 +1,7 @@
 extends SceneTree
 ## 移動・スクロール・影の位置・攻撃・敵・体力・同期ボーナス・光源による影の反転と倍率・影縫い・引き寄せの計算、
-## 昼・夕方・夜のステージの置き方とステージの進行、入力割り当て、設定と進行の保存・読み込み (壊れた保存データの
-## 扱いを含む)、シーンのロード、ステージごとの BGM の繰り返しと BGM・効果音を鳴らすバス、全素材が
+## 空を飛ぶ敵の揺れと置き方 (scripts/dev/selfcheck_flyer.gd)、昼・夕方・夜のステージの置き方とステージの進行、
+## 入力割り当て、設定と進行の保存・読み込み (壊れた保存データの扱いを含む)、シーンのロード、ステージごとの BGM の繰り返しと BGM・効果音を鳴らすバス、全素材が
 ## assets/CREDITS.md に記録されていることの検証。
 ## 実行方法は AGENTS.md を参照。release ビルドで assert が消えるため、明示的な判定と exit code で結果を返す。
 
@@ -20,6 +20,8 @@ const STAGE_SCRIPT := preload("res://scripts/stage.gd")
 const STAGES_SCRIPT := preload("res://scripts/stages.gd")
 ## 往復と体力の計算を持つ敵のスクリプト
 const ENEMY_SCRIPT := preload("res://scripts/enemy.gd")
+## 空を飛ぶ敵の揺れ・見た目と、各ステージの空を飛ぶ敵の置き方の検証
+const FLYER_CHECKS := preload("res://scripts/dev/selfcheck_flyer.gd")
 ## 同期ボーナスの計算
 const COMBAT_SCRIPT := preload("res://scripts/combat.gd")
 ## 体力と無敵時間・影縫いのゲージを持つ autoload のスクリプト
@@ -88,6 +90,8 @@ func _initialize() -> void:
 	_check_shadow_scale()
 	_check_stage_lights()
 	_check_stage_layouts()
+	for label: String in FLYER_CHECKS.new().run():
+		_check(false, label)
 	_check_shadow_with_offset()
 	_check_input_map()
 	_check_save_parse()
@@ -685,11 +689,8 @@ func _check_stage_layouts() -> void:
 					)
 				)
 		for spawn: Dictionary in stage.spawns:
-			var patrol: Rect2 = Rect2(
-				spawn["x"] - spawn["patrol"],
-				spawn["floor_y"] - ENEMY_SCRIPT.SIZE.y,
-				spawn["patrol"] + ENEMY_SCRIPT.SIZE.x,
-				ENEMY_SCRIPT.SIZE.y
+			var patrol: Rect2 = ENEMY_SCRIPT.patrol_area(
+				STAGE_SCRIPT.spawn_kind(spawn), spawn["x"], spawn["floor_y"], spawn["patrol"]
 			)
 			for rect: Rect2 in obstacles:
 				_check(
