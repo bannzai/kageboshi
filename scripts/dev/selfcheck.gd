@@ -1,6 +1,7 @@
 extends "res://scripts/dev/headless_check.gd"
 ## 移動・スクロール・影の位置・攻撃・敵・体力・同期ボーナス・光源による影の伸び縮み・影縫い・引き寄せの計算、
-## 空を飛ぶ敵の揺れと置き方 (scripts/dev/selfcheck_flyer.gd)、昼・夕方・夜のステージの置き方とステージの進行、
+## 空を飛ぶ敵の揺れと置き方 (scripts/dev/selfcheck_flyer.gd)、伸び縮みした影の当たり判定と影がくぐる・股の下を通す
+## 敵の置き方 (scripts/dev/selfcheck_dodge.gd)、昼・夕方・夜のステージの置き方とステージの進行、
 ## 入力割り当て、設定と進行の保存・読み込み (壊れた保存データの扱いを含む)、シーンのロード、ステージごとの BGM の繰り返しと BGM・効果音を鳴らすバス、全素材が
 ## assets/CREDITS.md に記録されていることの検証。
 ## 実行方法は AGENTS.md を参照。release ビルドで assert が消えるため、明示的な判定と exit code で結果を返す。
@@ -22,6 +23,8 @@ const STAGES_SCRIPT := preload("res://scripts/stages.gd")
 const ENEMY_SCRIPT := preload("res://scripts/enemy.gd")
 ## 空を飛ぶ敵の揺れ・見た目と、各ステージの空を飛ぶ敵の置き方の検証
 const FLYER_CHECKS := preload("res://scripts/dev/selfcheck_flyer.gd")
+## 伸び縮みした影の当たり判定と、各ステージの影がくぐる・股の下を通す敵の置き方の検証
+const DODGE_CHECKS := preload("res://scripts/dev/selfcheck_dodge.gd")
 ## 同期ボーナスの計算
 const COMBAT_SCRIPT := preload("res://scripts/combat.gd")
 ## 体力と無敵時間・影縫いのゲージを持つ autoload のスクリプト
@@ -88,7 +91,7 @@ func _initialize() -> void:
 	_check_shadow_scale()
 	_check_stage_lights()
 	_check_stage_layouts()
-	for label: String in FLYER_CHECKS.new().run():
+	for label: String in FLYER_CHECKS.new().run() + DODGE_CHECKS.new().run():
 		_check(false, label)
 	_check_shadow_with_offset()
 	_check_input_map()
@@ -665,7 +668,8 @@ func _check_shadow_in_zone(light: Dictionary, lights: Array[Dictionary], label: 
 
 
 ## 各ステージの地形・敵・ゴールの置き方。地形はステージの中の地面より上に x の昇順で並び、光源の影響範囲で主人公と
-## 影が動く範囲は地面だけの平らな所で敵の往復の範囲と重ならず、敵の往復の範囲とゴールは地形と重ならない
+## 影が動く範囲は地面だけの平らな所で上の画面の敵の往復の範囲と重ならず (重なる下の画面の敵は DODGE_CHECKS)、
+## 敵の往復の範囲とゴールは地形と重ならない
 func _check_stage_layouts() -> void:
 	for stage: STAGE_SCRIPT in STAGES_SCRIPT.all():
 		var obstacles: Array[Rect2] = stage.obstacles
@@ -690,7 +694,8 @@ func _check_stage_layouts() -> void:
 			var patrol: Rect2 = ENEMY_SCRIPT.patrol_area(
 				STAGE_SCRIPT.spawn_kind(spawn), spawn["x"], spawn["floor_y"], spawn["patrol"]
 			)
-			patrols.append(patrol)
+			if spawn["lane"] == COMBAT_SCRIPT.Lane.TOP:
+				patrols.append(patrol)
 			for rect: Rect2 in obstacles:
 				_check(
 					not patrol.intersects(rect),
@@ -701,7 +706,7 @@ func _check_stage_layouts() -> void:
 				_check(
 					not MAIN_SCRIPT.light_zone_range(light).intersects(rect),
 					(
-						"光源 (%s の x = %d): 影響範囲で主人公と影が動く範囲が %s (地形か敵の往復の範囲) と重ならない"
+						"光源 (%s の x = %d): 影響範囲で主人公と影が動く範囲が %s (地形か上の画面の敵の往復の範囲) と重ならない"
 						% [stage.title, int(light["x"]), rect]
 					)
 				)

@@ -2,7 +2,7 @@ extends RefCounted
 ## 空を飛ぶ敵の揺れ・見た目と、各ステージの空を飛ぶ敵の置き方の検証。scripts/dev/selfcheck.gd が run() を呼び、
 ## 返した失敗の内容を ERROR として出す。
 
-## 同期中の影の体の矩形 (光源の影響範囲で伸び縮みする影の体)
+## 同期中の影の当たり判定 (光源の影響範囲で伸び縮みする影の体)
 const Main := preload("res://scripts/main.gd")
 ## 主人公の体の大きさ・ジャンプの最高点・攻撃の範囲
 const Hero := preload("res://scripts/hero.gd")
@@ -142,10 +142,9 @@ func _check_standing(stage: Stage, spawn: Dictionary, area: Rect2, label: String
 	var x: float = 0.0
 	while x <= stage.width - Hero.SIZE.x:
 		var hero_at: Vector2 = Vector2(x, Stage.GROUND_Y - Hero.SIZE.y)
-		var bodies: Array[Rect2] = [
-			Rect2(hero_at, Hero.SIZE), Main.shadow_body_rect(hero_at, stage.lights)
-		]
-		if bodies[spawn["lane"]].intersects(lane_area):
+		var hero_rects: Array[Rect2] = [Rect2(hero_at, Hero.SIZE)]
+		var bodies: Array[Array] = [hero_rects, Main.shadow_hit_rects(hero_at, stage.lights)]
+		if Main.touches(bodies[spawn["lane"]], lane_area):
 			_expect(false, "%s: 地面に立つ主人公・影 (x = %d) に触れない" % [label, int(x)])
 			return
 		x += STAND_STEP
