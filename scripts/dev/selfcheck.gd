@@ -919,12 +919,6 @@ func _check_save_file() -> void:
 	_remove_file(broken_path)
 
 
-## path のファイルがあれば消す
-func _remove_file(path: String) -> void:
-	if FileAccess.file_exists(path):
-		DirAccess.remove_absolute(path)
-
-
 ## 昼・夕方・夜の各ステージに別々の BGM があって繰り返し鳴り、メインシーンの BGM と効果音は設定で音量を変えられる
 ## バスで鳴らす。メインシーンは tree には入れず (_ready を走らせず) ノードの設定だけを確認して free する
 func _check_audio() -> void:

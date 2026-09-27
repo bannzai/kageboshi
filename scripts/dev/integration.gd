@@ -1,4 +1,4 @@
-extends "res://scripts/dev/integration_helpers.gd"
+extends "res://scripts/dev/headless_check.gd"
 ## キー入力 (InputMap を通る InputEventKey) でメインシーンの主人公を動かし、地形との当たり判定・スクロール、
 ## 主人公の見た目の姿と向き、影が同じ動き・同じ攻撃・同じ姿をすること、画面ごとの敵の姿、敵を倒す・被弾・
 ## ゲームオーバー・同期ボーナス、空を飛ぶ敵にジャンプ中の攻撃が当たって倒れることと触れると被弾することと、
@@ -8,7 +8,7 @@ extends "res://scripts/dev/integration_helpers.gd"
 ## 戻ること、クリアしたステージの保存、設定画面での音量とキー割り当ての変更と保存、BGM がプレイ中の間だけ鳴って
 ## ポーズ・ゲームオーバーで止まることと、攻撃・ダメージ・同期ボーナス・影縫いで効果音が鳴ること、下の画面 (影・地形) が
 ## 仕切り線をはさんで上の画面と上下対称に描かれることを検証する。
-## 実行方法は AGENTS.md を参照。検証の流れを持たない共通の処理は scripts/dev/integration_helpers.gd に置く。
+## 実行方法は AGENTS.md を参照。
 ## 保存データはプレイヤーのもの (user://) を書き換えないよう SAVE_TEST_PATH に書き、最後に消す。
 ## 失敗したら quit(1) で終わる。
 
@@ -40,10 +40,6 @@ const STEP: Rect2 = Rect2(560.0, 272.0, 160.0, 48.0)
 const STAIR: Rect2 = Rect2(1340.0, 240.0, 60.0, 80.0)
 ## 昼のステージの、地面から 1 回では越えられない高さの壁 (Stages.DAY_OBSTACLES の 4 番目)
 const WALL: Rect2 = Rect2(1400.0, 160.0, 60.0, 160.0)
-## 最後のメインシーンを消してから終了するまで待つ時間 (秒)。消したシーンが鳴らしていた BGM・効果音の再生は
-## AudioServer がミキシングを数回進めてから解放するため、headless (1 フレームがほぼ 0 秒で進む) で待たずに終了すると
-## 再生がリークとして WARNING / ERROR に出る (CI で実測)。ミキシング数回分に余裕を持たせた値
-const AUDIO_RELEASE_TIME: float = 0.25
 
 ## シーンを置いた時の主人公の位置 (scenes/main.tscn の Hero)。ステージを作り直した後の位置の期待値に使う
 var hero_start: Vector2 = Vector2.ZERO
@@ -182,7 +178,7 @@ func _check_quit_to_title(main: Node2D, game_state: Node) -> Node2D:
 		return null
 	_check(restarted.scroll_x == 0.0, "タイトルへ戻る: スクロールが最初に戻る")
 	_check(game_state.stage_index == 0, "タイトルへ戻る: 最初のステージに戻る")
-	_check(_living_enemy_count(restarted) == 0, "タイトルへ戻る: 出現していた敵がいなくなる")
+	_check(_living_enemies(restarted).size() == 0, "タイトルへ戻る: 出現していた敵がいなくなる")
 	await _play_from_title(restarted, game_state, "タイトルへ戻った後")
 	return restarted
 
@@ -198,7 +194,7 @@ func _check_retry(main: Node2D, game_state: Node) -> Node2D:
 	var max_hp: int = game_state.MAX_HP
 	_check(_hp_is(game_state, max_hp, max_hp), "リトライ: 主人公と影の体力が最大値に戻る")
 	_check(not restarted.get_node("Screens/GameOver").visible, "リトライ: ゲームオーバーの表示が消える")
-	_check(_living_enemy_count(restarted) == 0, "リトライ: 敵がいなくなる")
+	_check(_living_enemies(restarted).size() == 0, "リトライ: 敵がいなくなる")
 	var hero: Hero = restarted.get_node("Hero")
 	await _hold_keys([KEY_RIGHT], 10)
 	_check(hero.position.x > hero_start.x, "リトライ: 右キーで主人公が動く")
@@ -270,26 +266,16 @@ func _check_stage_loaded(main: Node2D, stage: Stage, label: String) -> void:
 	)
 
 
-## 主人公を最初の位置に戻し、右キーを押し続けて地面にいる間はジャンプキーを押し直し、ステージクリアになるまで進む。
-## 地形だけで行き止まらずゴールに着けることを確かめるため、出現した敵は毎フレーム消す。
+## 主人公を最初の位置に戻し、ゴールまで進む入力の経路 (_walk_to_goal()) で跳び続けてステージクリアになるまで
+## 進む。地形だけで行き止まらずゴールに着けることを確かめるため、出現した敵は毎フレーム消す。
 ## ステージの横幅を移動の速さで進む時間の 2 倍のフレーム数を過ぎてもクリアにならなければ失敗として記録する
 func _run_to_goal(main: Node2D, game_state: Node, stage: Stage, label: String) -> void:
 	var hero: Hero = main.get_node("Hero")
 	hero.position = hero_start
 	hero.velocity = Vector2.ZERO
 	await _wait_physics_frames(2)
-	var frames_left: int = int(stage.width / Hero.MOVE_SPEED * 60.0 * 2.0)
-	Input.parse_input_event(_key_event(KEY_RIGHT, true))
-	while game_state.is_playing() and frames_left > 0:
-		_clear_enemies(main)
-		if hero.is_on_floor():
-			await _hold_keys([KEY_SPACE], 1)
-			frames_left -= 2
-		else:
-			await physics_frame
-			frames_left -= 1
-	Input.parse_input_event(_key_event(KEY_RIGHT, false))
-	await physics_frame
+	var frame_limit: int = int(stage.width / Hero.MOVE_SPEED * 60.0 * 2.0)
+	await _walk_to_goal(main, game_state, frame_limit, _hop_without_enemies)
 	_check(
 		game_state.screen == GameStateScript.Screen.CLEAR,
 		"%s: 最初の位置から右へ跳び続けるとゴールに着いてステージクリアになる (x = %.2f)" % [label, hero.position.x]
@@ -427,7 +413,7 @@ func _check_attack_and_sync(main: Node2D) -> void:
 	for _i: int in range(Enemy.MAX_HP - 1):
 		await _wait_physics_frames(20)
 		await _press_attack()
-	_check(_living_enemy_count(main) == 0, "攻撃: 通常の攻撃を体力の回数だけ当てると敵が倒れる")
+	_check(_living_enemies(main).size() == 0, "攻撃: 通常の攻撃を体力の回数だけ当てると敵が倒れる")
 	_check(
 		main.get_tree().get_nodes_in_group("sync_effect").is_empty(),
 		"同期: 上の画面だけに当てた時は同期ボーナスが出ない"
@@ -441,7 +427,7 @@ func _check_attack_and_sync(main: Node2D) -> void:
 	_check(bottom_enemy.get_node("Body").animation == &"bottom", "敵: 下の画面の敵は下の画面の姿")
 	await _press_attack()
 	_check(main.get_node("BottomLane/Shadow/Attack").visible, "攻撃: 同期中は影も同じ攻撃をする")
-	_check(_living_enemy_count(main) == 0, "同期: 上下で同時に当てた攻撃 1 回で上下の敵が倒れる")
+	_check(_living_enemies(main).size() == 0, "同期: 上下で同時に当てた攻撃 1 回で上下の敵が倒れる")
 	_check(
 		not main.get_tree().get_nodes_in_group("sync_effect").is_empty(),
 		"同期: 同期ボーナスの演出が出る"
@@ -459,7 +445,7 @@ func _check_attack_and_sync(main: Node2D) -> void:
 	main.spawn_enemy(Combat.Lane.BOTTOM, front_x, Stage.GROUND_Y, 0.0)
 	await _wait_physics_frames(2)
 	_check(
-		_living_enemy_count(main) == 0,
+		_living_enemies(main).size() == 0,
 		"同期: 上下の当たりが時間幅の中で別のフレームでも、先に当たった敵を含めて 1 回で倒れる"
 	)
 	_check(
@@ -483,7 +469,7 @@ func _check_flyer(main: Node2D, game_state: Node) -> void:
 	_check(flyer.hp == Enemy.MAX_HP, "飛ぶ敵: 地面に立ったままの攻撃は届かない")
 	for _i: int in range(Enemy.MAX_HP):
 		await _jump_attack(hero)
-	_check(_living_enemy_count(main) == 0, "飛ぶ敵: ジャンプ中の攻撃を体力の回数だけ当てると倒れる")
+	_check(_living_enemies(main).size() == 0, "飛ぶ敵: ジャンプ中の攻撃を体力の回数だけ当てると倒れる")
 
 	main.spawn_enemy(Combat.Lane.TOP, front_x, Stage.GROUND_Y, 0.0, Enemy.Kind.FLYER)
 	var bottom_flyer: Enemy = main.spawn_enemy(
@@ -494,7 +480,7 @@ func _check_flyer(main: Node2D, game_state: Node) -> void:
 	)
 	await _jump_attack(hero)
 	_check(
-		_living_enemy_count(main) == 0,
+		_living_enemies(main).size() == 0,
 		"飛ぶ敵: 上下の飛ぶ敵にジャンプ中の攻撃を同時に当てると 1 回で倒れる"
 	)
 
@@ -660,6 +646,12 @@ func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 		shadow_body.scale == hero_body.scale,
 		"%s: 反転区間を抜けると影の見た目の長さが主人公と同じに戻る" % label
 	)
+
+
+## ゴールまで進む経路 (_walk_to_goal()) の 1 物理フレーム分の動き方。出現した敵を消して跳び続ける
+func _hop_without_enemies(main: Node2D) -> RouteStep:
+	_clear_enemies(main)
+	return RouteStep.HOP
 
 
 ## 主人公の体の中心の x
