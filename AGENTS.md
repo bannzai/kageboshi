@@ -13,6 +13,7 @@
 - このマシンで実行してよいのは `make lint` (gdlint) だけ。ユーザーが明示的に頼んだ時と、人が遊んで確かめる `make run` はこの限りでない
 - 変更は push して PR を開き、CI の結果で成否を判断する。`gh pr checks <PR 番号> --watch` で完了を待ち、失敗したら `gh run view <run ID> --log-failed` と artifact `kageboshi-check-logs` の `tmp/*.log` を読む
 - 見た目の確認は artifact `kageboshi-screenshot-and-movie` を `gh run download <run ID> -n kageboshi-screenshot-and-movie -D tmp/artifact` で取得し、PNG と、mp4 の末尾のフレーム (`ffmpeg -sseof -1 -i tmp/artifact/movie.mp4 -frames:v 1 tmp/artifact/movie-last.png`) を目視してから完了報告する
+- ゲームの見た目・操作・敵・ステージに影響する変更では、テストプレイの artifact `kageboshi-playtest` を `gh run download <run ID> -n kageboshi-playtest -D tmp/artifact` で取得し、録画から一定間隔で切り出したフレーム (`ffmpeg -i tmp/artifact/playtest.mp4 -vf fps=1 tmp/artifact/playtest-%03d.png`) と静止画 `playtest-*.png` を目視する。気づいた問題 (意味の分からない表示・敵の配置・影の重なり・進めない場所など。`playtest.log` のゲームオーバーの記録を含む) を PR body の「テストプレイ」節に書いてから完了報告する (無ければ「無し」と書く)。問題が PR の issue の範囲外なら #17 (公開前チェックリスト) へコメントで送る
 
 各 target の内容と成功条件 (CI が実行する。`GODOT` 未指定時の既定は macOS の `/Applications/Godot.app/Contents/MacOS/Godot`、CI では Linux バイナリを渡す):
 
@@ -26,6 +27,7 @@
 | headless 検証の一括実行 (lint → check → selfcheck → integration) | `make test` | exit 0 |
 | スクリーンショット (タイトル・プレイ開始・ジャンプ・段差・スクロール・ポーズ・左右へ歩く姿・敵・同期ボーナス・ゲームオーバー・ステージクリア・夕方と夜のステージ・クリアを保存したタイトル・設定画面・壊れた保存データの知らせの見た目。headless の検証では見た目の崩れを検出できない) | `make screenshot` | exit 0 かつ `tmp/screenshot-*.png` が生成される |
 | 起動の録画 (操作なしの起動〜タイトルの表示。起動直後の描画崩れ・真っ黒を検出する) | `make movie` | exit 0 かつ `tmp/movie.mp4` が生成され、末尾のフレームの輝度平均が基準以上 (ffmpeg が必要) |
+| テストプレイの録画 (タイトルから昼 → 夕方 → 夜の全ステージを、攻撃・ジャンプ・影縫い・引き寄せを使い敵を倒しながら ALL CLEAR まで通して遊ぶ。ステージごとの開始・光源の反転区間・敵との戦闘・クリアの時点を静止画にも撮る。全ステージを通しても 3 分以内) | `make playtest` | exit 0 かつ `tmp/playtest.mp4` と `tmp/playtest-*.png` が生成され、`tmp/playtest.log` に `playtest OK` が出力され、WARNING / ERROR 行がない (ffmpeg が必要) |
 | ゲームをエディタなしで起動 (人が遊んで確かめる。アセットのインポートを含む) | `make run` | ウィンドウが開きタイトル画面が表示される |
 | デスクトップエクスポート | `make build-macos` / `make build-windows` / `make build-linux` / `make build-all` | exit 0 で `build/<platform>/` に成果物が生成される |
 

@@ -63,8 +63,9 @@ jobs:
           retention-days: 7
 
   # 描画付きの検証。headless の check / selfcheck / integration では見た目の崩れを検出できないため、
-  # Xvfb + Mesa llvmpipe (ソフトウェア GL) 上で代表画面の撮影と起動の録画を行い artifact に残す。
-  # PR を開いた agent は artifact をダウンロードして PNG と mp4 を目視してから完了報告する (AGENTS.md「検証方法」)
+  # Xvfb + Mesa llvmpipe (ソフトウェア GL) 上で代表画面の撮影と起動の録画、全ステージを通して遊ぶテストプレイの録画を
+  # 行い artifact に残す。PR を開いた agent は artifact をダウンロードして PNG と mp4 を目視してから完了報告する
+  # (AGENTS.md「検証方法」)
   screenshot-and-movie:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -102,5 +103,19 @@ jobs:
             tmp/screenshot-*.png
             tmp/movie.mp4
             tmp/*.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Playtest
+        run: make playtest GODOT="${{ steps.godot.outputs.godot }}"
+      - name: Upload playtest
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kageboshi-playtest
+          path: |
+            tmp/playtest.mp4
+            tmp/playtest-*.png
+            tmp/playtest.log
+            tmp/playtest.godot.log
           if-no-files-found: warn
           retention-days: 7

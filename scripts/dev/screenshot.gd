@@ -1,4 +1,4 @@
-extends SceneTree
+extends "res://scripts/dev/game_driver.gd"
 ## 実際の描画で代表画面を撮影する (headless では描画されないため、Makefile の screenshot target が
 ## --headless なしで起動する)。撮影した PNG は tmp/screenshot-<名前>.png に保存し、失敗したら quit(1) で終わる。
 ## 画面や状態を増やす時は _capture_scenes() だけを差し替える。
@@ -20,9 +20,6 @@ const SAVE_TEST_PATH: String = "res://tmp/screenshot-save.json"
 ## 前の攻撃のクールダウンが終わるのを待つ物理フレーム数の上限。攻撃の間隔 (0.3 秒 = 18 フレーム) に余裕を持たせ、
 ## プレイ中でない画面でクールダウンが進まない時に撮影が止まらないようにする
 const COOLDOWN_FRAME_LIMIT: int = 60
-## 最後のメインシーンを消してから終了するまで待つ時間 (秒)。理由と値の根拠は scripts/dev/integration.gd の
-## AUDIO_RELEASE_TIME と同じ (消したシーンが鳴らしていた音の再生を AudioServer が解放するまで待つ)
-const AUDIO_RELEASE_TIME: float = 0.25
 
 
 ## tree の準備が終わってから _run() を始める (シーンの追加は _initialize() の後でないとできない)
@@ -337,41 +334,3 @@ func _add_main() -> void:
 	var main: Node2D = MAIN_SCENE.instantiate()
 	root.add_child(main)
 	current_scene = main
-
-
-## 描画が反映されるまで 2 フレーム待ってから viewport を path に PNG で保存する。失敗したら quit(1) する
-func _capture(path: String) -> bool:
-	await process_frame
-	await process_frame
-	var status: Error = root.get_viewport().get_texture().get_image().save_png(path)
-	if status != OK:
-		push_error("スクリーンショット保存失敗: %s (%s)" % [path, error_string(status)])
-		quit(1)
-		return false
-	print("screenshot: " + path)
-	return true
-
-
-## physics_frames 物理フレームだけ待つ
-func _wait_physics_frames(physics_frames: int) -> void:
-	for _i: int in range(physics_frames):
-		await physics_frame
-
-
-## physical_keycodes (Key の配列) のキーを同時に押し、physics_frames 物理フレームの間押し続けてから離す
-func _hold_keys(physical_keycodes: Array, physics_frames: int) -> void:
-	for keycode: Key in physical_keycodes:
-		Input.parse_input_event(_key_event(keycode, true))
-	await _wait_physics_frames(physics_frames)
-	for keycode: Key in physical_keycodes:
-		Input.parse_input_event(_key_event(keycode, false))
-	await physics_frame
-
-
-## physical_keycode のキーを押した (pressed = true) / 離した (false) 入力イベント
-func _key_event(physical_keycode: Key, pressed: bool) -> InputEventKey:
-	var event: InputEventKey = InputEventKey.new()
-	event.physical_keycode = physical_keycode
-	event.keycode = physical_keycode
-	event.pressed = pressed
-	return event

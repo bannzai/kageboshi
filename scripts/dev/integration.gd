@@ -42,10 +42,6 @@ const WALL: Rect2 = Rect2(1400.0, 160.0, 60.0, 160.0)
 ## キーを押し続けて主人公を目標の位置まで動かす時の、待つ物理フレーム数の上限。移動の速さ (320 px/秒) で
 ## 反転区間 (200 px) を抜けるのにかかる約 40 フレームに余裕を持たせる
 const MOVE_FRAME_LIMIT: int = 180
-## 最後のメインシーンを消してから終了するまで待つ時間 (秒)。消したシーンが鳴らしていた BGM・効果音の再生は
-## AudioServer がミキシングを数回進めてから解放するため、headless (1 フレームがほぼ 0 秒で進む) で待たずに終了すると
-## 再生がリークとして WARNING / ERROR に出る (CI で実測)。ミキシング数回分に余裕を持たせた値
-const AUDIO_RELEASE_TIME: float = 0.25
 
 ## シーンを置いた時の主人公の位置 (scenes/main.tscn の Hero)。ステージを作り直した後の位置の期待値に使う
 var hero_start: Vector2 = Vector2.ZERO
@@ -271,26 +267,16 @@ func _check_stage_loaded(main: Node2D, stage: Stage, label: String) -> void:
 	)
 
 
-## 主人公を最初の位置に戻し、右キーを押し続けて地面にいる間はジャンプキーを押し直し、ステージクリアになるまで進む。
-## 地形だけで行き止まらずゴールに着けることを確かめるため、出現した敵は毎フレーム消す。
+## 主人公を最初の位置に戻し、ゴールまで進む入力の経路 (_walk_to_goal()) で跳び続けてステージクリアになるまで
+## 進む。地形だけで行き止まらずゴールに着けることを確かめるため、出現した敵は毎フレーム消す。
 ## ステージの横幅を移動の速さで進む時間の 2 倍のフレーム数を過ぎてもクリアにならなければ失敗として記録する
 func _run_to_goal(main: Node2D, game_state: Node, stage: Stage, label: String) -> void:
 	var hero: Hero = main.get_node("Hero")
 	hero.position = hero_start
 	hero.velocity = Vector2.ZERO
 	await _wait_physics_frames(2)
-	var frames_left: int = int(stage.width / Hero.MOVE_SPEED * 60.0 * 2.0)
-	Input.parse_input_event(_key_event(KEY_RIGHT, true))
-	while game_state.is_playing() and frames_left > 0:
-		_clear_enemies(main)
-		if hero.is_on_floor():
-			await _hold_keys([KEY_SPACE], 1)
-			frames_left -= 2
-		else:
-			await physics_frame
-			frames_left -= 1
-	Input.parse_input_event(_key_event(KEY_RIGHT, false))
-	await physics_frame
+	var frame_limit: int = int(stage.width / Hero.MOVE_SPEED * 60.0 * 2.0)
+	await _walk_to_goal(main, game_state, frame_limit, _hop_without_enemies)
 	_check(
 		game_state.screen == GameStateScript.Screen.CLEAR,
 		"%s: 最初の位置から右へ跳び続けるとゴールに着いてステージクリアになる (x = %.2f)" % [label, hero.position.x]
@@ -613,6 +599,12 @@ func _clear_enemies(main: Node2D) -> void:
 		enemy.queue_free()
 
 
+## ゴールまで進む経路 (_walk_to_goal()) の 1 物理フレーム分の動き方。出現した敵を消して跳び続ける
+func _hop_without_enemies(main: Node2D) -> RouteStep:
+	_clear_enemies(main)
+	return RouteStep.HOP
+
+
 ## 主人公の体の中心の x
 func _center_x(hero: Hero) -> float:
 	return hero.position.x + Hero.SIZE.x / 2.0
@@ -772,13 +764,6 @@ func _living_enemy_count(main: Node2D) -> int:
 		if not enemy.is_queued_for_deletion():
 			count += 1
 	return count
-
-
-## 上の画面と下の画面の敵
-func _enemies(main: Node2D) -> Array[Node]:
-	var enemies: Array[Node] = main.get_node("Enemies").get_children()
-	enemies.append_array(main.get_node("BottomLane/Enemies").get_children())
-	return enemies
 
 
 ## 平らな地面での左右移動とジャンプ
