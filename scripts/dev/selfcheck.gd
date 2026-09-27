@@ -1,4 +1,4 @@
-extends SceneTree
+extends "res://scripts/dev/headless_check.gd"
 ## 移動・スクロール・影の位置・攻撃・敵・体力・同期ボーナス・光源による影の反転と倍率・影縫い・引き寄せの計算、
 ## 昼・夕方・夜のステージの置き方とステージの進行、入力割り当て、設定と進行の保存・読み込み (壊れた保存データの
 ## 扱いを含む)、シーンのロード、ステージごとの BGM の繰り返しと BGM・効果音を鳴らすバス、全素材が
@@ -63,9 +63,6 @@ const CREDITS_PATH: String = "res://assets/CREDITS.md"
 ## スクロールと影縫いのずれの検証に使うステージの横幅
 const TEST_STAGE_WIDTH: float = 3200.0
 
-## 検証が 1 件でも失敗したか。true なら exit code 1 で終わる
-var failed: bool = false
-
 
 func _initialize() -> void:
 	_check_next_velocity()
@@ -106,13 +103,6 @@ func _initialize() -> void:
 ## 保存の検証でクリアしたステージとして書くステージの ID (最初のステージの ID)
 func _first_stage_id() -> String:
 	return STAGES_SCRIPT.all()[0].id
-
-
-## cond が false なら label を ERROR として出し、失敗として記録する
-func _check(cond: bool, label: String) -> void:
-	if not cond:
-		push_error("selfcheck FAIL: " + label)
-		failed = true
 
 
 func _check_next_velocity() -> void:
@@ -235,34 +225,51 @@ func _check_enemy_hp() -> void:
 	synced.free()
 
 
-## autoload とは別のインスタンスで、体力・無敵時間・ゲームオーバーの遷移を確認して free する
+## autoload とは別のインスタンスで、主人公と影それぞれの体力・無敵時間と、どちらかの体力が 0 になった時の
+## ゲームオーバーの遷移を確認して free する
 func _check_game_state() -> void:
+	var top: COMBAT_SCRIPT.Lane = COMBAT_SCRIPT.Lane.TOP
+	var bottom: COMBAT_SCRIPT.Lane = COMBAT_SCRIPT.Lane.BOTTOM
+	var full: int = GAME_STATE_SCRIPT.MAX_HP
 	var state: Node = GAME_STATE_SCRIPT.new()
-	_check(state.hp == GAME_STATE_SCRIPT.MAX_HP, "体力: 最初は最大値")
-	_check(state.take_damage(1), "体力: ダメージを受ける")
-	_check(state.hp == GAME_STATE_SCRIPT.MAX_HP - 1, "体力: ダメージの分だけ減る")
-	_check(not state.take_damage(1), "体力: 被弾直後の無敵の間はダメージを受けない")
+	_check(_hp_is(state, full, full), "体力: 主人公も影も最初は最大値")
+	_check(state.take_damage(top, 1), "体力: 上の画面で被弾すると主人公がダメージを受ける")
+	_check(_hp_is(state, full - 1, full), "体力: 上の画面の被弾は主人公の体力だけを減らす")
+	_check(not state.take_damage(top, 1), "体力: 被弾直後の主人公は無敵の間ダメージを受けない")
+	_check(state.take_damage(bottom, 1), "体力: 無敵時間は体ごとで、主人公が無敵の間も影は被弾する")
+	_check(_hp_is(state, full - 1, full - 1), "体力: 下の画面の被弾は影の体力だけを減らす")
 	state.tick(GAME_STATE_SCRIPT.INVINCIBLE_TIME)
-	_check(state.take_damage(1), "体力: 無敵時間が過ぎたらまたダメージを受ける")
-	while not state.is_game_over():
+	_check(state.take_damage(top, 1), "体力: 無敵時間が過ぎたらまたダメージを受ける")
+	while state.take_damage(bottom, 1):
 		state.tick(GAME_STATE_SCRIPT.INVINCIBLE_TIME)
-		if not state.take_damage(1):
-			break
-	_check(state.hp == 0 and state.is_game_over(), "体力: 0 になったらゲームオーバー")
+	_check(
+		state.is_game_over() and _hp_is(state, full - 2, 0),
+		"体力: 主人公の体力が残っていても影の体力が 0 になったらゲームオーバー"
+	)
 	state.tick(GAME_STATE_SCRIPT.INVINCIBLE_TIME)
-	_check(not state.take_damage(1) and state.hp == 0, "体力: ゲームオーバー後は 0 より減らない")
+	_check(
+		not state.take_damage(top, 1) and _hp_is(state, full - 2, 0), "体力: ゲームオーバー後は減らない"
+	)
 	_check(
 		state.send(GAME_STATE_SCRIPT.Command.CONFIRM), "体力: ゲームオーバーからのやり直しはステージを作り直す"
 	)
 	_check(
-		state.hp == GAME_STATE_SCRIPT.MAX_HP and state.is_playing(),
-		"体力: ゲームオーバーからやり直すと最大値に戻ってプレイ中になる"
+		_hp_is(state, full, full) and state.is_playing(),
+		"体力: ゲームオーバーからやり直すと主人公も影も最大値に戻ってプレイ中になる"
 	)
-	state.take_damage(1)
+	while state.take_damage(top, 1):
+		state.tick(GAME_STATE_SCRIPT.INVINCIBLE_TIME)
+	_check(
+		state.is_game_over() and _hp_is(state, 0, full),
+		"体力: 影の体力が残っていても主人公の体力が 0 になったらゲームオーバー"
+	)
+	state.send(GAME_STATE_SCRIPT.Command.CONFIRM)
+	state.take_damage(top, 1)
+	state.take_damage(bottom, 1)
 	state.reset()
 	_check(
-		state.hp == GAME_STATE_SCRIPT.MAX_HP and not state.is_invincible(),
-		"体力: reset で最大値に戻り無敵も解ける"
+		_hp_is(state, full, full) and not state.is_invincible(top) and not state.is_invincible(bottom),
+		"体力: reset で主人公も影も最大値に戻り無敵も解ける"
 	)
 	state.free()
 
@@ -573,7 +580,7 @@ func _check_stage_lights() -> void:
 						previous["x"] + previous["zone"]
 						<= MAIN_SCRIPT.shadow_reverse_range(light).position.x
 					),
-					"%s: x の昇順で、反転区間と予兆の帯が前の光源の反転区間と重ならない" % label
+					"%s: x の昇順で、反転区間と影が逆へ動く範囲が前の光源の反転区間と重ならない" % label
 				)
 			_check_shadow_in_zone(light, lights, label)
 	var day: Vector2i = _scale_counts(stages[0])
@@ -672,8 +679,8 @@ func _check_stage_layouts() -> void:
 				_check(obstacles[i - 1].position.x <= rect.position.x, "%s: x の昇順" % label)
 			_check(not rect.intersects(goal), "%s: ゴールと重ならない" % label)
 		for light: Dictionary in stage.lights:
-			var band: Rect2 = MAIN_SCRIPT.shadow_reverse_range(light)
-			var left: float = band.position.x - HERO_SCRIPT.SIZE.x / 2.0
+			var reverse_range: Rect2 = MAIN_SCRIPT.shadow_reverse_range(light)
+			var left: float = reverse_range.position.x - HERO_SCRIPT.SIZE.x / 2.0
 			var right: float = light["x"] + light["zone"] + HERO_SCRIPT.SIZE.x / 2.0
 			var moving: Rect2 = Rect2(left, 0.0, right - left, STAGE_SCRIPT.GROUND_Y)
 			for rect: Rect2 in obstacles:

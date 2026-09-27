@@ -1,7 +1,7 @@
 extends SceneTree
-## キー入力 (InputMap を通る InputEventKey) でメインシーンを動かす開発用スクリプト (scripts/dev/ の integration.gd・
-## screenshot.gd・playtest.gd) が共通で使う、キーの押し方・物理フレームの待ち方・ゴールまで進む入力の経路・撮影。
-## 各スクリプトはこのスクリプトを継承し、_initialize() から自分の検証・撮影を始める。
+## キー入力 (InputMap を通る InputEventKey) でメインシーンを動かす開発用スクリプト (scripts/dev/ の screenshot.gd・
+## playtest.gd と、headless_check.gd を継承する selfcheck.gd・integration.gd) が共通で使う、キーの押し方・物理フレームの
+## 待ち方・ゴールまで進む入力の経路・撮影。各スクリプトは _initialize() から自分の検証・撮影を始める。
 
 ## ゴールまで進む入力の経路 (_walk_to_goal()) で、1 物理フレームにどう動くか
 enum RouteStep {

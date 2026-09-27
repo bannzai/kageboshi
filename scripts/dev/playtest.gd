@@ -21,6 +21,8 @@ const Hero := preload("res://scripts/hero.gd")
 const Enemy := preload("res://scripts/enemy.gd")
 ## 光源の反転区間の計算
 const Light := preload("res://scripts/light.gd")
+## 体力を持つ体を表す画面 (上の画面は主人公、下の画面は影)
+const Combat := preload("res://scripts/combat.gd")
 ## 画面 (Screen) の定義を持つ autoload の GameState のスクリプト
 const GameStateScript := preload("res://scripts/game_state.gd")
 ## テストプレイ中の保存データの置き場所
@@ -48,8 +50,8 @@ const ALL_CLEAR_TIME: float = 1.5
 var captured: Dictionary = {}
 ## 攻撃キーを押したままか。押した次の物理フレームで離し、次の攻撃で押し直せるようにする
 var attack_held: bool = false
-## 前の物理フレームの体力。減ったら被弾した位置をログに残す
-var last_hp: int = 0
+## 前の物理フレームの主人公と影の体力 (GameState の hp の写し)。減ったら被弾した体と位置をログに残す
+var last_hp: Array[int] = []
 
 
 ## tree の準備が終わってから _run() を始める (シーンの追加は _initialize() の後でないとできない)
@@ -103,8 +105,8 @@ func _play_stage(main: Node2D, game_state: Node, index: int) -> Node2D:
 			var defeated: int = main.spawned_count - _living_enemies(main).size()
 			print(
 				(
-					"playtest: %s をクリア (残りの体力 %d、倒した敵 %d / 出現 %d、リトライ %d 回)"
-					% [stage.title, game_state.hp, defeated, main.spawned_count, retries]
+					"playtest: %s をクリア (残りの体力 %s、倒した敵 %d / 出現 %d、リトライ %d 回)"
+					% [stage.title, _hp_text(game_state.hp), defeated, main.spawned_count, retries]
 				)
 			)
 			return await _leave_clear(main, prefix, index == Stages.count() - 1)
@@ -127,7 +129,7 @@ func _play_attempt(main: Node2D, game_state: Node, prefix: String, frame_limit: 
 		return false
 	if not await _stitch_and_pull(main, prefix):
 		return false
-	last_hp = game_state.hp
+	last_hp = game_state.hp.duplicate()
 	await _walk_to_goal(main, game_state, frame_limit, _fight.bind(prefix))
 	_release_attack()
 	if game_state.screen == GameStateScript.Screen.CLEAR or game_state.is_game_over():
@@ -176,11 +178,11 @@ func _stitch_and_pull(main: Node2D, prefix: String) -> bool:
 ## ゴールまで進む経路 (_walk_to_goal()) の、敵と戦いながら進む 1 物理フレーム分の動き方。戦闘は攻撃の見た目が
 ## 出ている、攻撃を始めた次のフレームで撮る
 func _fight(main: Node2D, prefix: String) -> RouteStep:
-	var hp: int = root.get_node("GameState").hp
-	if hp < last_hp:
+	var hp: Array[int] = root.get_node("GameState").hp
+	if hp != last_hp:
 		var hero_x: float = main.get_node("Hero").position.x
-		print("playtest: %s の x = %.1f で被弾 (残りの体力 %d)" % [main.stage.title, hero_x, hp])
-	last_hp = hp
+		print("playtest: %s の x = %.1f で被弾 (残りの体力 %s)" % [main.stage.title, hero_x, _hp_text(hp)])
+	last_hp = hp.duplicate()
 	if attack_held:
 		_release_attack()
 		await _capture_once(prefix + "-combat")
@@ -246,6 +248,11 @@ func _enemy_ahead(main: Node2D) -> bool:
 		if gap >= 0.0 and gap <= ENGAGE_DISTANCE:
 			return true
 	return false
+
+
+## 主人公と影の体力 hp (GameState の hp) をログに出す文字列
+func _hp_text(hp: Array[int]) -> String:
+	return "主人公 %d / 影 %d" % [hp[Combat.Lane.TOP], hp[Combat.Lane.BOTTOM]]
 
 
 ## 倒れて消える途中のものを除いた敵
