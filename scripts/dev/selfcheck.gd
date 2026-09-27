@@ -1,5 +1,5 @@
 extends "res://scripts/dev/headless_check.gd"
-## 移動・スクロール・影の位置・攻撃・敵・体力・同期ボーナス・光源による影の反転と倍率・影縫い・引き寄せの計算、
+## 移動・スクロール・影の位置・攻撃・敵・体力・同期ボーナス・光源による影の伸び縮み・影縫い・引き寄せの計算、
 ## 空を飛ぶ敵の揺れと置き方 (scripts/dev/selfcheck_flyer.gd)、昼・夕方・夜のステージの置き方とステージの進行、
 ## 入力割り当て、設定と進行の保存・読み込み (壊れた保存データの扱いを含む)、シーンのロード、ステージごとの BGM の繰り返しと BGM・効果音を鳴らすバス、全素材が
 ## assets/CREDITS.md に記録されていることの検証。
@@ -28,9 +28,10 @@ const COMBAT_SCRIPT := preload("res://scripts/combat.gd")
 const GAME_STATE_SCRIPT := preload("res://scripts/game_state.gd")
 ## 影縫いと引き寄せの計算
 const STITCH_SCRIPT := preload("res://scripts/shadow_stitch.gd")
-## 光源による影の反転と倍率の計算
+## 光源による影の伸び縮みの計算
 const LIGHT_SCRIPT := preload("res://scripts/light.gd")
-## 反転と倍率の検証に使う光源 (倍率 1 の高さ)。ステージの光源を変えても期待値が変わらないように、検証用に置く
+## 伸び縮みの検証に使う光源 (倍率 1 の高さと、倍率 2 の低い光源)。ステージの光源を変えても期待値が変わらないように、
+## 検証用に置く
 const TEST_LIGHTS: Array[Dictionary] = [
 	{"x": 1000.0, "height": LIGHT_SCRIPT.STANDARD_HEIGHT, "zone": 200.0},
 	{"x": 2000.0, "height": LIGHT_SCRIPT.STANDARD_HEIGHT / 2.0, "zone": 100.0},
@@ -83,7 +84,7 @@ func _initialize() -> void:
 	_check_next_pin()
 	_check_stitch_offset()
 	_check_light_side()
-	_check_light_reversal()
+	_check_light_stretch()
 	_check_shadow_scale()
 	_check_stage_lights()
 	_check_stage_layouts()
@@ -125,7 +126,7 @@ func _check_next_velocity() -> void:
 	_check(falling.y == gravity_step, "落下: 空中では重力で下向きに加速する")
 
 
-## 主人公の体の見た目は攻撃・空中 (上昇と落下)・歩き・待機の姿になり、影は反転区間でだけ主人公と逆を向く
+## 主人公の体の見た目は攻撃・空中 (上昇と落下)・歩き・待機の姿になる
 func _check_body_animation() -> void:
 	var cases: Array[Array] = [
 		[true, false, Vector2(0.0, -100.0), &"attack"],
@@ -136,9 +137,6 @@ func _check_body_animation() -> void:
 	]
 	for c: Array in cases:
 		_check(HERO_SCRIPT.body_animation(c[0], c[1], c[2]) == c[3], "見た目: %s の姿を選ぶ" % c[3])
-	var in_zone: Vector2 = Vector2(TEST_LIGHTS[0]["x"], 0.0)
-	_check(MAIN_SCRIPT.shadow_facing(in_zone, 1.0, TEST_LIGHTS) == -1.0, "見た目: 反転区間の影は逆を向く")
-	_check(MAIN_SCRIPT.shadow_facing(Vector2.ZERO, -1.0, TEST_LIGHTS) == -1.0, "見た目: 区間外は同じ向き")
 
 
 func _check_scroll_for() -> void:
@@ -156,7 +154,7 @@ func _check_scroll_for() -> void:
 func _check_shadow_position() -> void:
 	var expected: Vector2 = Vector2(300.0, 200.0 + MAIN_SCRIPT.SCREEN_HEIGHT)
 	_check(
-		MAIN_SCRIPT.shadow_position(Vector2(300.0, 200.0), TEST_LIGHTS) == expected,
+		MAIN_SCRIPT.shadow_position(Vector2(300.0, 200.0)) == expected,
 		"影: 同期中は主人公の上の画面 1 つ分下にいる"
 	)
 
@@ -497,47 +495,56 @@ func _check_stitch_offset() -> void:
 	)
 
 
-## 光源の左 (手前)・真下・右 (またいだ先) の判定
+## 光源の左・真下・右の判定 (影が伸びる向き)
 func _check_light_side() -> void:
 	_check(LIGHT_SCRIPT.side_of(1000.0, 999.0) == -1.0, "光源: 光源より左にいれば左側")
-	_check(LIGHT_SCRIPT.side_of(1000.0, 1000.0) == 1.0, "光源: 光源の真下はまたいだ側 (右側)")
+	_check(LIGHT_SCRIPT.side_of(1000.0, 1000.0) == 0.0, "光源: 光源の真下はどちら側でもない")
 	_check(LIGHT_SCRIPT.side_of(1000.0, 1001.0) == 1.0, "光源: 光源より右にいれば右側")
 
 
-## 倍率 1 の光源 (TEST_LIGHTS の 1 つ目) の手前・反転区間・出口の先で、主人公の体の中心の x を入力に
-## 影の体の中心の x と向きを確かめる
-func _check_light_reversal() -> void:
-	_check(LIGHT_SCRIPT.shadow_center_x(900.0, TEST_LIGHTS) == 900.0, "反転: 光源の手前では影が主人公と同じ位置")
-	_check(LIGHT_SCRIPT.shadow_direction(900.0, TEST_LIGHTS) == 1.0, "反転: 光源の手前では影が主人公と同じ向き")
-	_check(
-		LIGHT_SCRIPT.shadow_center_x(1000.0, TEST_LIGHTS) == 1000.0,
-		"反転: 光源をまたいだ瞬間は影が主人公と同じ位置 (位置が飛ばない)"
-	)
-	_check(LIGHT_SCRIPT.shadow_center_x(1100.0, TEST_LIGHTS) == 900.0, "反転: 反転区間では光源の x を軸に逆側にいる")
-	_check(
-		LIGHT_SCRIPT.shadow_center_x(1150.0, TEST_LIGHTS) == 850.0,
-		"反転: 反転区間で主人公が右へ 50 進むと影は左へ 50 進む"
-	)
-	_check(LIGHT_SCRIPT.shadow_direction(1100.0, TEST_LIGHTS) == -1.0, "反転: 反転区間では影が主人公と逆向き")
-	_check(
-		LIGHT_SCRIPT.active_light(1100.0, TEST_LIGHTS) == TEST_LIGHTS[0],
-		"反転: 反転区間にいる光源が有効になる"
-	)
-	_check(
-		LIGHT_SCRIPT.shadow_center_x(1199.0, TEST_LIGHTS) == 801.0, "反転: 反転区間の出口の手前まで逆側にいる"
-	)
-	_check(
-		LIGHT_SCRIPT.shadow_center_x(1200.0, TEST_LIGHTS) == 1200.0,
-		"反転: 反転区間を抜けたら影が主人公と同じ位置に戻る"
-	)
-	_check(LIGHT_SCRIPT.shadow_direction(1200.0, TEST_LIGHTS) == 1.0, "反転: 反転区間を抜けたら同じ向きに戻る")
-	_check(
-		LIGHT_SCRIPT.active_light(1500.0, TEST_LIGHTS).is_empty(), "反転: 反転区間の外では有効な光源がない"
-	)
-	_check(LIGHT_SCRIPT.shadow_scale_at(1500.0, TEST_LIGHTS) == 1.0, "倍率: 反転区間の外は 1")
+## TEST_LIGHTS の倍率 1 の光源の左右と、倍率 2 の光源の手前・左側・真下・右側・出口の先で、主人公の体の中心の x を
+## 入力に、有効な光源と影が伸びる向きと倍率、向きごとの攻撃のリーチの倍率を確かめる
+func _check_light_stretch() -> void:
+	var cases: Array[Array] = [
+		# [主人公の体の中心の x, 有効な光源 (TEST_LIGHTS の番号。無ければ -1), 影が伸びる向き, 影の長さの倍率, 場所]
+		[900.0, 0, -1.0, 1.0, "倍率 1 の光源の左側"],
+		[1100.0, 0, 1.0, 1.0, "倍率 1 の光源の右側"],
+		[1850.0, -1, 0.0, 1.0, "影響範囲の手前"],
+		[1900.0, -1, 0.0, 1.0, "影響範囲の左端"],
+		[1950.0, 1, -1.0, 2.0, "光源の左側"],
+		[2000.0, 1, 0.0, 1.0, "光源の真下"],
+		[2050.0, 1, 1.0, 2.0, "光源の右側"],
+		[2100.0, -1, 0.0, 1.0, "影響範囲の右端"],
+		[2150.0, -1, 0.0, 1.0, "影響範囲を抜けた先"],
+	]
+	for c: Array in cases:
+		var expected: Dictionary = {} if c[1] < 0 else TEST_LIGHTS[c[1]]
+		_check(LIGHT_SCRIPT.active_light(c[0], TEST_LIGHTS) == expected, "伸び: %s の有効な光源" % c[4])
+		_check(
+			LIGHT_SCRIPT.stretch_direction(c[0], TEST_LIGHTS) == c[2],
+			"伸び: %s では影が伸びる向きが %d" % [c[4], int(c[2])]
+		)
+		_check(
+			LIGHT_SCRIPT.shadow_scale_at(c[0], TEST_LIGHTS) == c[3],
+			"伸び: %s では影の長さの倍率が %.1f" % [c[4], c[3]]
+		)
+		for facing: float in [-1.0, 1.0]:
+			var away: bool = facing == c[2]
+			_check(
+				LIGHT_SCRIPT.reach_scale_at(c[0], facing, TEST_LIGHTS) == (c[3] if away else 1.0),
+				(
+					"伸び: %s で %s を向いた攻撃のリーチは%s"
+					% [c[4], "左" if facing < 0.0 else "右", "伸びる" if away else "主人公と同じ"]
+				)
+			)
+		var hero_at: Vector2 = Vector2(c[0] - HERO_SCRIPT.SIZE.x / 2.0, 200.0)
+		_check(
+			MAIN_SCRIPT.shadow_position(hero_at) == hero_at + Vector2(0.0, MAIN_SCRIPT.SCREEN_HEIGHT),
+			"伸び: %s でも影の足元は主人公の上の画面 1 つ分下にいる" % c[4]
+		)
 
 
-## 光源の高さから決まる倍率と、倍率ごとの影の移動量
+## 光源の高さから決まる倍率
 func _check_shadow_scale() -> void:
 	var standard: float = LIGHT_SCRIPT.STANDARD_HEIGHT
 	_check(LIGHT_SCRIPT.shadow_scale(standard) == 1.0, "倍率: 基準の高さの光源では 1")
@@ -548,20 +555,9 @@ func _check_shadow_scale() -> void:
 	_check(
 		LIGHT_SCRIPT.shadow_scale(100000.0) == LIGHT_SCRIPT.MIN_SCALE, "倍率: 真上の光源でも下限で止まる"
 	)
-	_check(LIGHT_SCRIPT.shadow_scale_at(2020.0, TEST_LIGHTS) == 2.0, "倍率: 反転区間では光源の高さの倍率")
-	var moved: float = (
-		LIGHT_SCRIPT.shadow_center_x(2050.0, TEST_LIGHTS)
-		- LIGHT_SCRIPT.shadow_center_x(2020.0, TEST_LIGHTS)
-	)
-	_check(moved == -60.0, "移動量: 倍率 2 の反転区間で主人公が右へ 30 進むと影は左へ 60 進む")
-	var standard_moved: float = (
-		LIGHT_SCRIPT.shadow_center_x(1150.0, TEST_LIGHTS)
-		- LIGHT_SCRIPT.shadow_center_x(1120.0, TEST_LIGHTS)
-	)
-	_check(standard_moved == -30.0, "移動量: 倍率 1 の反転区間で主人公が右へ 30 進むと影は左へ 30 進む")
 
 
-## 各ステージの光源の置き方と、各光源の反転区間での影の体・攻撃の範囲 (倍率ごとの見た目の長さ・リーチ)。
+## 各ステージの光源の置き方と、各光源の影響範囲での影の体・攻撃の範囲 (倍率ごとの見た目の長さ・リーチ)。
 ## 昼は影が縮む高い光源だけ、夕方は影が伸びる低い光源だけ、夜は影が縮む光源と伸びる光源が点在する
 func _check_stage_lights() -> void:
 	var stages: Array[STAGE_SCRIPT] = STAGES_SCRIPT.all()
@@ -580,11 +576,8 @@ func _check_stage_lights() -> void:
 			if i > 0:
 				var previous: Dictionary = lights[i - 1]
 				_check(
-					(
-						previous["x"] + previous["zone"]
-						<= MAIN_SCRIPT.shadow_reverse_range(light).position.x
-					),
-					"%s: x の昇順で、反転区間と影が逆へ動く範囲が前の光源の反転区間と重ならない" % label
+					previous["x"] + previous["zone"] <= light["x"] - light["zone"],
+					"%s: x の昇順で、影響範囲が前の光源の影響範囲と重ならない" % label
 				)
 			_check_shadow_in_zone(light, lights, label)
 	var day: Vector2i = _scale_counts(stages[0])
@@ -615,54 +608,64 @@ func _scale_counts(stage: STAGE_SCRIPT) -> Vector2i:
 	return counts
 
 
-## 光源が lights のステージの light の手前・またいだ瞬間・反転区間の中で、影の体と攻撃の範囲を確かめる。
+## 光源が lights のステージの light の影響範囲の手前・真下・左右の中で、影の体と攻撃の範囲を確かめる。
 ## label は失敗した時に出す光源の名前
 func _check_shadow_in_zone(light: Dictionary, lights: Array[Dictionary], label: String) -> void:
 	var hero_size: Vector2 = HERO_SCRIPT.SIZE
 	var feet_y: float = STAGE_SCRIPT.GROUND_Y
 	var offset: Vector2 = Vector2(0.0, MAIN_SCRIPT.SCREEN_HEIGHT)
-	var before: Vector2 = Vector2(light["x"] - 100.0 - hero_size.x / 2.0, feet_y - hero_size.y)
+	var reach: float = HERO_SCRIPT.ATTACK_REACH
+	var before: Vector2 = Vector2(
+		light["x"] - light["zone"] - hero_size.x / 2.0, feet_y - hero_size.y
+	)
 	_check(
 		MAIN_SCRIPT.shadow_body_rect(before, lights) == Rect2(before + offset, hero_size),
-		"%s: 手前では影の体が主人公と同じ大きさで真下にある" % label
+		"%s: 影響範囲の手前では影の体が主人公と同じ大きさで真下にある" % label
 	)
+	for facing: float in [-1.0, 1.0]:
+		_check(
+			MAIN_SCRIPT.shadow_attack_area(before, facing, lights)
+			== HERO_SCRIPT.attack_area(before + offset, facing, reach),
+			"%s: 影響範囲の手前では影の攻撃が主人公と同じ向き・同じリーチ" % label
+		)
+	var under: Vector2 = Vector2(light["x"] - hero_size.x / 2.0, feet_y - hero_size.y)
 	_check(
-		MAIN_SCRIPT.shadow_attack_area(before, 1.0, lights)
-		== HERO_SCRIPT.attack_area(before + offset, 1.0, HERO_SCRIPT.ATTACK_REACH),
-		"%s: 手前では影の攻撃が主人公と同じ向き・同じリーチ" % label
-	)
-	var crossing: Vector2 = Vector2(light["x"] - hero_size.x / 2.0, feet_y - hero_size.y)
-	_check(
-		MAIN_SCRIPT.shadow_position(crossing, lights) == crossing + offset,
-		"%s: またいだ瞬間は影が主人公の真下にいる" % label
+		MAIN_SCRIPT.shadow_body_rect(under, lights) == Rect2(under + offset, hero_size),
+		"%s: 光源の真下では影の体が主人公と同じ大きさで真下にある" % label
 	)
 	var scale: float = LIGHT_SCRIPT.shadow_scale(light["height"])
-	var inside: Vector2 = Vector2(
-		light["x"] + light["zone"] / 2.0 - hero_size.x / 2.0, feet_y - hero_size.y
-	)
-	var at: Vector2 = MAIN_SCRIPT.shadow_position(inside, lights)
-	var body: Rect2 = MAIN_SCRIPT.shadow_body_rect(inside, lights)
-	_check(
-		is_equal_approx(body.size.y, hero_size.y * scale),
-		"%s: 反転区間では影の見た目の長さが倍率の分だけ伸び縮みする" % label
-	)
-	_check(
-		is_equal_approx(body.end.y, feet_y + offset.y),
-		"%s: 伸び縮みしても影の足元は下の画面の地面にある" % label
-	)
-	var attack: Rect2 = MAIN_SCRIPT.shadow_attack_area(inside, 1.0, lights)
-	_check(
-		is_equal_approx(attack.size.x, HERO_SCRIPT.ATTACK_REACH * scale),
-		"%s: 反転区間では影の攻撃のリーチが倍率の分だけ伸び縮みする" % label
-	)
-	_check(
-		is_equal_approx(attack.end.x, at.x),
-		"%s: 右を向いた主人公の影の攻撃は、反転区間では影の左へ出る" % label
-	)
+	for side: float in [-1.0, 1.0]:
+		var side_name: String = "左側" if side < 0.0 else "右側"
+		var inside: Vector2 = Vector2(
+			light["x"] + side * light["zone"] / 2.0 - hero_size.x / 2.0, feet_y - hero_size.y
+		)
+		var body: Rect2 = MAIN_SCRIPT.shadow_body_rect(inside, lights)
+		_check(
+			(
+				is_equal_approx(body.position.x, inside.x)
+				and is_equal_approx(body.size.x, hero_size.x)
+				and is_equal_approx(body.end.y, feet_y + offset.y)
+			),
+			"%s: 光源の%sでも影の足元は主人公の真下 (下の画面の地面) にある" % [label, side_name]
+		)
+		_check(
+			is_equal_approx(body.size.y, hero_size.y * scale),
+			"%s: 光源の%sでは影の見た目の長さが倍率の分だけ伸び縮みする" % [label, side_name]
+		)
+		var away: Rect2 = MAIN_SCRIPT.shadow_attack_area(inside, side, lights)
+		_check(
+			away.is_equal_approx(HERO_SCRIPT.attack_area(inside + offset, side, reach * scale)),
+			"%s: 光源の%sで光源から遠ざかる向きの影の攻撃は、同じ向きに倍率のリーチで出る" % [label, side_name]
+		)
+		var toward: Rect2 = MAIN_SCRIPT.shadow_attack_area(inside, -side, lights)
+		_check(
+			toward == HERO_SCRIPT.attack_area(inside + offset, -side, reach),
+			"%s: 光源の%sで光源に近づく向きの影の攻撃は、主人公と同じ向き・同じリーチ" % [label, side_name]
+		)
 
 
-## 各ステージの地形・敵・ゴールの置き方。地形はステージの中の地面より上に x の昇順で並び、反転区間で主人公と影が
-## 動く範囲は地面だけの平らな所で、敵の往復の範囲とゴールは地形と重ならない
+## 各ステージの地形・敵・ゴールの置き方。地形はステージの中の地面より上に x の昇順で並び、光源の影響範囲で主人公と
+## 影が動く範囲は地面だけの平らな所で敵の往復の範囲と重ならず、敵の往復の範囲とゴールは地形と重ならない
 func _check_stage_layouts() -> void:
 	for stage: STAGE_SCRIPT in STAGES_SCRIPT.all():
 		var obstacles: Array[Rect2] = stage.obstacles
@@ -682,32 +685,30 @@ func _check_stage_layouts() -> void:
 			if i > 0:
 				_check(obstacles[i - 1].position.x <= rect.position.x, "%s: x の昇順" % label)
 			_check(not rect.intersects(goal), "%s: ゴールと重ならない" % label)
-		for light: Dictionary in stage.lights:
-			var reverse_range: Rect2 = MAIN_SCRIPT.shadow_reverse_range(light)
-			var left: float = reverse_range.position.x - HERO_SCRIPT.SIZE.x / 2.0
-			var right: float = light["x"] + light["zone"] + HERO_SCRIPT.SIZE.x / 2.0
-			var moving: Rect2 = Rect2(left, 0.0, right - left, STAGE_SCRIPT.GROUND_Y)
-			for rect: Rect2 in obstacles:
-				_check(
-					not moving.intersects(rect),
-					(
-						"光源 (%s の x = %d): 反転区間で主人公と影が動く範囲が地面だけの平らな所"
-						% [stage.title, int(light["x"])]
-					)
-				)
+		var patrols: Array[Rect2] = []
 		for spawn: Dictionary in stage.spawns:
 			var patrol: Rect2 = ENEMY_SCRIPT.patrol_area(
 				STAGE_SCRIPT.spawn_kind(spawn), spawn["x"], spawn["floor_y"], spawn["patrol"]
 			)
+			patrols.append(patrol)
 			for rect: Rect2 in obstacles:
 				_check(
 					not patrol.intersects(rect),
 					"出現 (%s の x = %d): 敵の往復の範囲が地形と重ならない" % [stage.title, int(spawn["x"])]
 				)
+		for light: Dictionary in stage.lights:
+			for rect: Rect2 in obstacles + patrols:
+				_check(
+					not MAIN_SCRIPT.light_zone_range(light).intersects(rect),
+					(
+						"光源 (%s の x = %d): 影響範囲で主人公と影が動く範囲が %s (地形か敵の往復の範囲) と重ならない"
+						% [stage.title, int(light["x"]), rect]
+					)
+				)
 
 
 ## 影縫いのずれがある時の影の体・攻撃の範囲は、同期中の影の体・攻撃の範囲をずれの分だけ動かしたもので、
-## 大きさ・向きは主人公がいる光源の反転区間で決まる (最初のステージの最初の光源の反転区間の中で確かめる)
+## 大きさ・リーチは主人公がいる光源の影響範囲で決まる (最初のステージの最初の光源の影響範囲の中で確かめる)
 func _check_shadow_with_offset() -> void:
 	var lights: Array[Dictionary] = STAGES_SCRIPT.all()[0].lights
 	var light: Dictionary = lights[0]
@@ -721,14 +722,14 @@ func _check_shadow_with_offset() -> void:
 		MAIN_SCRIPT.shadow_body_rect(inside, lights, offset).is_equal_approx(
 			Rect2(body.position + offset, body.size)
 		),
-		"影縫いと光源: ずれた影の体は、反転区間の同期中の影の体をずれの分だけ動かした位置と大きさ"
+		"影縫いと光源: ずれた影の体は、影響範囲の同期中の影の体をずれの分だけ動かした位置と大きさ"
 	)
 	var attack: Rect2 = MAIN_SCRIPT.shadow_attack_area(inside, 1.0, lights)
 	_check(
 		MAIN_SCRIPT.shadow_attack_area(inside, 1.0, lights, offset).is_equal_approx(
 			Rect2(attack.position + offset, attack.size)
 		),
-		"影縫いと光源: ずれた影の攻撃は、反転区間の同期中の影の攻撃をずれの分だけ動かした向き・リーチ"
+		"影縫いと光源: ずれた影の攻撃は、影響範囲の同期中の影の攻撃をずれの分だけ動かした向き・リーチ"
 	)
 	_check(
 		MAIN_SCRIPT.shadow_body_rect(inside, lights, Vector2.ZERO) == body,

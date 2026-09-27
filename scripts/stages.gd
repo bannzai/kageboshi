@@ -1,6 +1,6 @@
 extends RefCounted
 ## 遊ぶ順 (昼 → 夕方 → 夜) に並べたステージ。昼は高い光源だけで影が縮み、夕方は低い光源だけで影が伸び、
-## 夜は高さの違う光源が点在して反転区間ごとに影が伸び縮みする。ステージ 1 本の形は scripts/stage.gd。
+## 夜は高さの違う光源が点在して影響範囲ごとに影が伸び縮みする。ステージ 1 本の形は scripts/stage.gd。
 
 ## ステージ 1 本の定義
 const Stage := preload("res://scripts/stage.gd")
@@ -40,10 +40,11 @@ const DAY_SPAWNS: Array[Dictionary] = [
 	{"x": 2500.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 200.0},
 	{"x": 3000.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 240.0},
 ]
-## 昼の光源。どちらも高い街灯で、影が縮む
+## 昼の光源。どちらも高い街灯で、影が縮む。1 本目は最初の段差と足場の間、2 本目は x = 2500 と x = 3000 の敵の
+## 往復の間の平らな所に置く
 const DAY_LIGHTS: Array[Dictionary] = [
-	{"x": 2300.0, "height": 280.0, "zone": 200.0},
-	{"x": 2700.0, "height": 300.0, "zone": 160.0},
+	{"x": 930.0, "height": 280.0, "zone": 150.0},
+	{"x": 2646.0, "height": 300.0, "zone": 90.0},
 ]
 
 ## 夕方の地形。x = 1300 と x = 1380 の 2 段を続けて登る
@@ -79,8 +80,8 @@ const EVENING_SPAWNS: Array[Dictionary] = [
 ]
 ## 夕方の光源。どちらも低い松明で、影が伸びる
 const EVENING_LIGHTS: Array[Dictionary] = [
-	{"x": 1800.0, "height": 96.0, "zone": 160.0},
-	{"x": 2400.0, "height": 80.0, "zone": 140.0},
+	{"x": 1956.0, "height": 96.0, "zone": 150.0},
+	{"x": 2486.0, "height": 80.0, "zone": 110.0},
 ]
 
 ## 夜の地形。x = 1780 と x = 1900 の 2 段を続けて登る
@@ -117,10 +118,10 @@ const NIGHT_SPAWNS: Array[Dictionary] = [
 ]
 ## 夜の光源。高さの違う街灯と松明が点在し、影が縮む区間と伸びる区間が交互に来る
 const NIGHT_LIGHTS: Array[Dictionary] = [
-	{"x": 900.0, "height": 200.0, "zone": 140.0},
-	{"x": 1500.0, "height": 120.0, "zone": 140.0},
-	{"x": 2200.0, "height": 240.0, "zone": 160.0},
-	{"x": 2800.0, "height": 100.0, "zone": 140.0},
+	{"x": 896.0, "height": 200.0, "zone": 120.0},
+	{"x": 1455.0, "height": 120.0, "zone": 140.0},
+	{"x": 2190.0, "height": 240.0, "zone": 140.0},
+	{"x": 2756.0, "height": 100.0, "zone": 140.0},
 ]
 
 
