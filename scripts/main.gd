@@ -54,14 +54,10 @@ const SYNC_COLOR: Color = Color(1.0, 0.82, 0.25, 1.0)
 const SYNC_EFFECT_TIME: float = 0.6
 ## 光源の柱の色
 const LAMP_POST_COLOR: Color = Color(0.25, 0.22, 0.2, 1.0)
-## 光源の灯りと、反転区間を照らす光・下の画面の帯の矢印の色
+## 光源の灯りと、反転区間を照らす光の色
 const LAMP_LIGHT_COLOR: Color = Color(1.0, 0.86, 0.45, 1.0)
 ## 上の画面で反転区間を照らす光の不透明度 (地形・敵が透けて見える薄さにする)
 const LAMP_BEAM_ALPHA: float = 0.3
-## 下の画面で、反転区間の影が逆へ動く範囲の帯の色 (下の画面の背景より明るくし、影が逆へ動く所だと分かるようにする)
-const REVERSE_ZONE_COLOR: Color = Color(0.5, 0.45, 0.3, 0.35)
-## 下の画面の帯に並べる左向きの矢印の間隔 (px)。矢印どうしの間を矢印 1 つ分以上空け、並んだ矢印だと読めるようにする
-const REVERSE_ARROW_SPACING: float = 48.0
 ## ゴールの目印の色
 const GOAL_COLOR: Color = Color(1.0, 0.82, 0.25, 0.45)
 ## 画面を切り替える入力のアクションと、GameState に送る操作。設定画面を閉じる操作 (BACK) は、設定画面のキー割り当ての
@@ -113,7 +109,7 @@ var pulling: bool = false
 @onready var save_data: SaveDataScript = get_node("/root/SaveData")
 ## 上の画面の主人公
 @onready var hero: Hero = $Hero
-## 下の画面に描くもの (地形・反転区間の予兆・敵・影) の親。子の位置は判定の座標 (上の画面の座標から SCREEN_HEIGHT
+## 下の画面に描くもの (地形・敵・影) の親。子の位置は判定の座標 (上の画面の座標から SCREEN_HEIGHT
 ## だけ下) のまま置き、この親の変換 (_ready() で y を反転して 3 * SCREEN_HEIGHT だけ下へ動かす) で描画の座標へ写す。
 ## 判定の y が SCREEN_HEIGHT + h (上の画面の y = h) のものは描画の y = 2 * SCREEN_HEIGHT - h に描かれ、上の画面を
 ## 仕切り線 (y = SCREEN_HEIGHT) で上下反転した位置になる (主人公の足元の y = 320 と影の足元の描画の y = 400 が
@@ -137,8 +133,6 @@ var pulling: bool = false
 @onready var bottom_terrain: Node2D = $BottomLane/BottomTerrain
 ## 上の画面の光源と反転区間を照らす光 (見た目だけ) を入れる親
 @onready var lights: Node2D = $Lights
-## 下の画面の反転区間の予兆 (見た目だけ) を入れる親
-@onready var bottom_lights: Node2D = $BottomLane/BottomLights
 ## 敵を入れる親。Combat.Lane で引く (上の画面の敵は Enemies、下の画面の敵は BottomLane/Enemies)
 @onready var lane_enemies: Array[Node2D] = [$Enemies as Node2D, $BottomLane/Enemies as Node2D]
 ## 上下の画面の仕切り線に重ねる光。同期ボーナスの時だけ不透明にしてから消す
@@ -290,7 +284,7 @@ func _collision_body(area: Rect2) -> StaticBody2D:
 	return body
 
 
-## 親の座標で area を占める単色の見た目 (地形・光源・反転区間の帯)
+## 親の座標で area を占める単色の見た目 (地形・光源)
 func _terrain_rect(area: Rect2, color: Color) -> ColorRect:
 	var rect: ColorRect = ColorRect.new()
 	rect.position = area.position
@@ -300,9 +294,8 @@ func _terrain_rect(area: Rect2, color: Color) -> ColorRect:
 	return rect
 
 
-## ステージの光源 (Stage.lights) ごとに、上の画面には光源 (柱と灯り) と反転区間を照らす光を、下の画面には反転区間で影が
-## 逆へ動く範囲 (光源から左へ、反転区間の幅に倍率を掛けた幅) の帯と左向きの矢印を置く (反転区間の予兆)。
-## 帯の幅で影の伸び縮みも前もって分かる。主人公は画面の中央にいるため、反転区間は入る半画面前から見える
+## ステージの光源 (Stage.lights) ごとに、上の画面に光源 (柱と灯り) と反転区間を照らす光を置く (反転区間の予兆)。
+## 主人公は画面の中央にいるため、反転区間は入る半画面前から見える
 func _build_lights() -> void:
 	for light: Dictionary in stage.lights:
 		var x: float = light["x"]
@@ -315,22 +308,6 @@ func _build_lights() -> void:
 		lights.add_child(beam)
 		lights.add_child(_terrain_rect(Rect2(x - 3.0, lamp_y, 6.0, light["height"]), LAMP_POST_COLOR))
 		lights.add_child(_terrain_rect(Rect2(x - 10.0, lamp_y - 12.0, 20.0, 14.0), LAMP_LIGHT_COLOR))
-		var band: Rect2 = shadow_reverse_range(light)
-		bottom_lights.add_child(_terrain_rect(band, REVERSE_ZONE_COLOR))
-		var arrow_y: float = band.get_center().y
-		var arrow_x: float = band.position.x + REVERSE_ARROW_SPACING / 2.0
-		while arrow_x < band.end.x:
-			var arrow: Polygon2D = Polygon2D.new()
-			arrow.polygon = PackedVector2Array(
-				[
-					Vector2(arrow_x - 10.0, arrow_y),
-					Vector2(arrow_x + 10.0, arrow_y - 12.0),
-					Vector2(arrow_x + 10.0, arrow_y + 12.0)
-				]
-			)
-			arrow.color = LAMP_LIGHT_COLOR
-			bottom_lights.add_child(arrow)
-			arrow_x += REVERSE_ARROW_SPACING
 
 
 ## 影縫い・引き寄せの入力とゲージから、このフレームの縫い止めを決める。縫い止めている間はゲージを減らす。
