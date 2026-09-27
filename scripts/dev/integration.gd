@@ -261,7 +261,8 @@ func _check_stage_loaded(main: Node2D, stage: Stage, label: String) -> void:
 	)
 
 
-## 主人公を最初の位置に戻し、ゴールまで進む入力の経路 (_walk_to_goal()) で跳び続けてステージクリアになるまで進む。地形だけで行き止まらずゴールに着けることを確かめるため、出現した敵は毎フレーム消す。
+## 主人公を最初の位置に戻し、ゴールまで進む入力の経路 (_walk_to_goal()) で跳び続けてステージクリアになるまで
+## 進む。地形だけで行き止まらずゴールに着けることを確かめるため、出現した敵は毎フレーム消す。
 ## ステージの横幅を移動の速さで進む時間の 2 倍のフレーム数を過ぎてもクリアにならなければ失敗として記録する
 func _run_to_goal(main: Node2D, game_state: Node, stage: Stage, label: String) -> void:
 	var hero: Hero = main.get_node("Hero")
