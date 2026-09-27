@@ -7,10 +7,13 @@ extends CharacterBody2D
 const SIZE: Vector2 = Vector2(40.0, 64.0)
 ## 横移動の速さ (px/秒)。1 秒で画面幅の 1/4 進む
 const MOVE_SPEED: float = 320.0
-## ジャンプの初速 (px/秒。負が上)。GRAVITY と合わせて最高点が約 114 px (体の高さの約 1.8 倍) になる
+## ジャンプの初速 (px/秒。負が上)。GRAVITY と合わせて最高点 (JUMP_HEIGHT) が体の高さの約 1.8 倍になる
 const JUMP_VELOCITY: float = -640.0
 ## 重力加速度 (px/秒²)。滞空が約 0.7 秒になる
 const GRAVITY: float = 1800.0
+## 床から跳んだ最高点で足元が床から上がる高さ (px)。初速と重力から求めた値で、物理フレームの刻みで進める実際の
+## 最高点はこれより数 px 高い
+const JUMP_HEIGHT: float = JUMP_VELOCITY * JUMP_VELOCITY / (2.0 * GRAVITY)
 ## 攻撃が届く範囲の横幅 (体の前方)。敵 1 体分 (32 px) より少し長い
 const ATTACK_REACH: float = 48.0
 ## 攻撃が届く範囲の高さ。ATTACK_TOP と合わせて、地面に立つ敵 (高さ 32 px) に届く高さにする

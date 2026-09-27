@@ -6,6 +6,8 @@ extends RefCounted
 const Stage := preload("res://scripts/stage.gd")
 ## 敵の出現先の画面 (Combat.Lane)
 const Combat := preload("res://scripts/combat.gd")
+## 敵の種類 (Enemy.Kind)
+const Enemy := preload("res://scripts/enemy.gd")
 
 ## 昼の地形。地面から 1 回では越えられない高さの壁 (x = 1400) の手前に段 (x = 1340) を置き、段から跳び移れる
 ## ようにする。足場 (x = 1140) は段の前で跳ぶ主人公の頭に当たらないよう、段の手前で主人公の体の幅より広く空ける
@@ -16,10 +18,24 @@ const DAY_OBSTACLES: Array[Rect2] = [
 	Rect2(1400.0, 160.0, 60.0, 160.0),
 	Rect2(1900.0, 272.0, 240.0, 48.0),
 ]
-## 昼の敵の出現位置
+## 昼の敵の出現位置。空を飛ぶ敵は、下の画面は壁の先の平らな所、上の画面は x = 1900 の段差の上に置く
 const DAY_SPAWNS: Array[Dictionary] = [
+	{
+		"x": 1660.0,
+		"floor_y": Stage.GROUND_Y,
+		"lane": Combat.Lane.BOTTOM,
+		"patrol": 140.0,
+		"kind": Enemy.Kind.FLYER,
+	},
 	{"x": 1760.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 240.0},
 	{"x": 1860.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 160.0},
+	{
+		"x": 2100.0,
+		"floor_y": DAY_OBSTACLES[4].position.y,
+		"lane": Combat.Lane.TOP,
+		"patrol": 160.0,
+		"kind": Enemy.Kind.FLYER,
+	},
 	{"x": 2500.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 200.0},
 	{"x": 2500.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 200.0},
 	{"x": 3000.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 240.0},
@@ -38,8 +54,22 @@ const EVENING_OBSTACLES: Array[Rect2] = [
 	Rect2(1380.0, 176.0, 80.0, 144.0),
 	Rect2(2640.0, 264.0, 120.0, 56.0),
 ]
-## 夕方の敵の出現位置
+## 夕方の敵の出現位置。空を飛ぶ敵は、下の画面は x = 900 の段差の手前、上の画面はその段差の上に置く
 const EVENING_SPAWNS: Array[Dictionary] = [
+	{
+		"x": 860.0,
+		"floor_y": Stage.GROUND_Y,
+		"lane": Combat.Lane.BOTTOM,
+		"patrol": 200.0,
+		"kind": Enemy.Kind.FLYER,
+	},
+	{
+		"x": 1060.0,
+		"floor_y": EVENING_OBSTACLES[1].position.y,
+		"lane": Combat.Lane.TOP,
+		"patrol": 140.0,
+		"kind": Enemy.Kind.FLYER,
+	},
 	{"x": 1180.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 60.0},
 	{"x": 1700.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 160.0},
 	{"x": 2300.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 120.0},
@@ -61,10 +91,25 @@ const NIGHT_OBSTACLES: Array[Rect2] = [
 	Rect2(1900.0, 224.0, 80.0, 96.0),
 	Rect2(3100.0, 256.0, 160.0, 64.0),
 ]
-## 夜の敵の出現位置
+## 夜の敵の出現位置。空を飛ぶ敵は、下の画面は x = 500 の段差の上から最初の光源の手前まで、上の画面は x = 1780 の
+## 段差の上に置く
 const NIGHT_SPAWNS: Array[Dictionary] = [
+	{
+		"x": 700.0,
+		"floor_y": Stage.GROUND_Y,
+		"lane": Combat.Lane.BOTTOM,
+		"patrol": 200.0,
+		"kind": Enemy.Kind.FLYER,
+	},
 	{"x": 1100.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 40.0},
 	{"x": 1720.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 40.0},
+	{
+		"x": 1868.0,
+		"floor_y": NIGHT_OBSTACLES[2].position.y,
+		"lane": Combat.Lane.TOP,
+		"patrol": 88.0,
+		"kind": Enemy.Kind.FLYER,
+	},
 	{"x": 2500.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.TOP, "patrol": 100.0},
 	{"x": 2500.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 100.0},
 	{"x": 3040.0, "floor_y": Stage.GROUND_Y, "lane": Combat.Lane.BOTTOM, "patrol": 60.0},

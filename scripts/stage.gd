@@ -4,6 +4,9 @@ extends RefCounted
 ## main.gd の bottom_lane)。
 ## 遊ぶ順に並べたステージの一覧は scripts/stages.gd に置く。
 
+## 敵の種類 (Enemy.Kind)
+const Enemy := preload("res://scripts/enemy.gd")
+
 ## 地面の上端の y 座標。全ステージで共通
 const GROUND_Y: float = 320.0
 ## 画面の右端からこの距離だけ先の出現位置まで出現させる (画面に入る直前に置き、出現の瞬間を見せない)
@@ -23,9 +26,10 @@ var width: float = 0.0
 var sky: Color = Color.WHITE
 ## 地面と左右の端の見えない壁を除いた地形 (足場・段差・壁) の矩形。x の昇順に並べる
 var obstacles: Array[Rect2] = []
-## 敵の出現位置。x の昇順に並べる。x は出現位置 (体の左端)、floor_y は足元の y 座標 (上の画面の座標)、
-## lane は出現する画面 (scripts/combat.gd の Lane)、patrol は x から左へ往復する幅。往復の範囲は地形の段差・壁と
-## 重ならないように置く
+## 敵の出現位置。x の昇順に並べる。x は出現位置 (体の左端)、floor_y は足元の床の y 座標 (上の画面の座標)、
+## lane は出現する画面 (scripts/combat.gd の Lane)、patrol は x から左へ往復する幅、kind は敵の種類
+## (scripts/enemy.gd の Kind。書かなければ地面を歩く敵。spawn_kind())。往復の範囲は地形の段差・壁と重ならないように
+## 置く。空を飛ぶ敵は、地形とその上に立つ主人公に触れず、地上の敵と往復の範囲が重ならない所に置く
 var spawns: Array[Dictionary] = []
 ## 光源 (松明・街灯)。x の昇順に並べる。x は光源の位置、height は地面からの光源の高さ (scripts/light.gd の
 ## shadow_scale() で影の倍率になる)、zone は光源をまたいだ先 (右) の反転区間の幅。反転区間どうしは重ならないように置く。
@@ -74,6 +78,12 @@ func ceiling() -> Rect2:
 ## ゴール。主人公の体がこの矩形に入るとステージクリアになる。ステージの右端の壁の手前に置く
 func goal() -> Rect2:
 	return Rect2(width - GOAL_WIDTH, 0.0, GOAL_WIDTH, GROUND_Y)
+
+
+## spawn (spawns の要素) の敵の種類。kind を書いていない出現位置は地面を歩く敵にする。出現位置の大半は地面を歩く敵で、
+## 全部に kind を書くと 1 行が lint の上限 (100 文字) を越えて 1 体ごとに複数行になるため、飛ぶ敵にだけ書く
+static func spawn_kind(spawn: Dictionary) -> Enemy.Kind:
+	return spawn.get("kind", Enemy.Kind.WALKER)
 
 
 ## 画面の右端が view_right の時に出現済みであるべき敵の数 (spawns の先頭からの個数)

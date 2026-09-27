@@ -27,3 +27,7 @@
 | `sprites/enemy/slime_normal_walk_b.png` | 上の画面の敵の歩きの 2 枚目 | 同上 | 同上 | なし |
 | `sprites/enemy/slime_fire_walk_a.png` | 下の画面の敵の歩きの 1 枚目 | 同上 | 同上 | なし |
 | `sprites/enemy/slime_fire_walk_b.png` | 下の画面の敵の歩きの 2 枚目 | 同上 | 同上 | なし |
+| `sprites/enemy/bee_a.png` | 上の画面の空を飛ぶ敵の 1 枚目 | 同上 | 同上 | なし (元のファイル名のまま) |
+| `sprites/enemy/bee_b.png` | 上の画面の空を飛ぶ敵の 2 枚目 | 同上 | 同上 | なし (元のファイル名のまま) |
+| `sprites/enemy/fly_a.png` | 下の画面の空を飛ぶ敵の 1 枚目 | 同上 | 同上 | なし (元のファイル名のまま) |
+| `sprites/enemy/fly_b.png` | 下の画面の空を飛ぶ敵の 2 枚目 | 同上 | 同上 | なし (元のファイル名のまま) |
