@@ -202,7 +202,7 @@ func _check_retry(main: Node2D, game_state: Node) -> Node2D:
 	return restarted
 
 
-## プレイ中の index 番目のステージのメインシーン main で、そのステージが読み込まれていること・光源の予兆と反転区間の
+## プレイ中の index 番目のステージのメインシーン main で、そのステージが読み込まれていること・光源の反転区間の
 ## 影を確かめてから、最初の位置からゴールに着いてステージクリアになり、操作を受け付けないことを確かめる。
 ## Enter キーで次のステージ (最後のステージならタイトル) へ移り、読み込み直されたメインシーンを返す
 func _check_stage(main: Node2D, game_state: Node, index: int) -> Node2D:
@@ -218,7 +218,6 @@ func _check_stage(main: Node2D, game_state: Node, index: int) -> Node2D:
 	_check(
 		bgm.playing and bgm.stream == StageBgm.STAGE_BGM[stage.id], "%s: ステージの BGM が鳴る" % label
 	)
-	_check_light_omen(main, stage)
 	for light: Dictionary in stage.lights:
 		await _check_light_reversal(main, light)
 	await _run_to_goal(main, game_state, stage, label)
@@ -502,19 +501,6 @@ func _check_damage_and_game_over(main: Node2D, game_state: Node) -> void:
 	_check(absf(hero.position.x - over_x) < POSITION_TOLERANCE, "ゲームオーバー: 操作を受け付けない")
 
 
-## stage の各光源の反転区間の予兆として、下の画面の光源の x から左へ、反転区間の幅に倍率を掛けた幅の帯が置かれている
-func _check_light_omen(main: Node2D, stage: Stage) -> void:
-	for light: Dictionary in stage.lights:
-		var width: float = light["zone"] * Light.shadow_scale(light["height"])
-		var band: Rect2 = Rect2(light["x"] - width, main.SCREEN_HEIGHT, width, Stage.GROUND_Y)
-		var found: bool = false
-		for child: Node in main.get_node("BottomLane/BottomLights").get_children():
-			found = found or (
-				child is ColorRect and Rect2(child.position, child.size).is_equal_approx(band)
-			)
-		_check(found, "予兆: 光源 (x = %d) の反転区間で影が動く範囲に下の画面の帯がある" % int(light["x"]))
-
-
 ## light (遊んでいるステージの Stage.lights の要素) の手前から右キーで進むと、光源をまたいだ反転区間で影だけが左へ、光源の倍率の分だけ
 ## 動き、左キーでは影が右へ動く。反転区間では影の攻撃が主人公と逆向きに倍率のリーチで出て、影の後ろ (左) にいる
 ## 下の画面の敵に当たる。反転区間を抜けると影が主人公の真下に戻る
@@ -554,11 +540,11 @@ func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 		),
 		"%s: 伸び縮みした影も主人公の足元と仕切り線をはさんで対称な足元から下へ伸びて描かれる" % label
 	)
-	var band: Rect2 = main.shadow_reverse_range(light)
+	var reverse_range: Rect2 = main.shadow_reverse_range(light)
 	var shadow_center: float = shadow.position.x + Hero.SIZE.x / 2.0
 	_check(
-		band.position.x <= shadow_center and shadow_center <= band.end.x,
-		"%s: 反転区間の影は予兆の帯の範囲にいる" % label
+		reverse_range.position.x <= shadow_center and shadow_center <= reverse_range.end.x,
+		"%s: 反転区間の影は光源から左へ反転区間の幅に倍率を掛けた範囲にいる" % label
 	)
 
 	var behind: Node2D = main.spawn_enemy(
