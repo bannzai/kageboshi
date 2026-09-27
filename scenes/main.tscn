@@ -164,6 +164,23 @@ sprite_frames = SubResource("SpriteFrames_hero")
 animation = &"idle"
 offset = Vector2(0, -64)
 
+[node name="LegLeft" type="ColorRect" parent="BottomLane/Shadow"]
+visible = false
+offset_top = 28.0
+offset_right = 5.0
+offset_bottom = 64.0
+mouse_filter = 2
+color = Color(0.04, 0.04, 0.06, 1)
+
+[node name="LegRight" type="ColorRect" parent="BottomLane/Shadow"]
+visible = false
+offset_left = 35.0
+offset_top = 28.0
+offset_right = 40.0
+offset_bottom = 64.0
+mouse_filter = 2
+color = Color(0.04, 0.04, 0.06, 1)
+
 [node name="Attack" type="ColorRect" parent="BottomLane/Shadow"]
 visible = false
 offset_left = 40.0
