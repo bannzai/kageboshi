@@ -159,16 +159,16 @@ func _check_pause(main: Node2D, game_state: Node) -> void:
 	var hero_at: Vector2 = hero.position
 	var enemy_at: Vector2 = enemy.position
 	await _hold_keys([KEY_LEFT, KEY_J], 20)
-	_check(hero.position == hero_at, "ポーズ: 移動キーを押しても主人公が動かない")
+	_check(hero.position == hero_at and not hero.body.can_process(), "ポーズ: 主人公が動かず絵も止まる")
 	_check(not hero.is_attacking(), "ポーズ: 攻撃キーを押しても攻撃しない")
-	_check(enemy.position == enemy_at, "ポーズ: 敵も止まる")
+	_check(enemy.position == enemy_at and not enemy.body.can_process(), "ポーズ: 敵も絵も止まる")
 	await _hold_keys([KEY_ESCAPE], 1)
 	_check(game_state.is_playing(), "ポーズ: もう一度 Esc キーでプレイ中に戻る")
 	_check(not main.get_node("Screens/Pause").visible, "ポーズ: 再開するとポーズの表示が消える")
 	_check(bgm.playing and not bgm.stream_paused, "ポーズ: 再開すると BGM がまた鳴る")
 	await _hold_keys([KEY_LEFT], 10)
 	_check(hero.position.x < hero_at.x, "ポーズ: 再開すると続きから動く")
-	_check(enemy.position != enemy_at, "ポーズ: 再開すると敵も動く")
+	_check(enemy.position != enemy_at and enemy.body.can_process(), "ポーズ: 再開すると敵も絵も動く")
 
 
 ## ポーズから Q キーでタイトルに戻ると、ステージが最初から作り直される。そこから Enter キーでまた遊べる

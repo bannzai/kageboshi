@@ -210,6 +210,7 @@ func _physics_process(delta: float) -> void:
 		_step_stage(delta)
 	_update_hud()
 	_update_bgm()
+	_update_animations()
 
 
 ## 画面を切り替える入力を GameState に送る。ステージを最初から作り直す遷移なら、このシーンを読み込み直して
@@ -530,6 +531,15 @@ func _update_bgm() -> void:
 	bgm_player.stream_paused = not game_state.is_playing()
 	if game_state.is_playing() and not bgm_player.has_stream_playback():
 		bgm_player.play()
+
+
+## 主人公と敵の見た目のアニメーションはプレイ中の間だけ進め、ポーズ・ゲームオーバー・ステージクリアでは止める。
+## 影の見た目は主人公の再生から写すため (_sync_shadow())、主人公と一緒に止まる
+func _update_animations() -> void:
+	var mode: ProcessMode = PROCESS_MODE_INHERIT if game_state.is_playing() else PROCESS_MODE_DISABLED
+	hero.body.process_mode = mode
+	for parent: Node2D in lane_enemies:
+		parent.process_mode = mode
 
 
 ## hints ([アクション, 操作の説明] の並び) の操作の案内。キーは各アクションの今の 1 つ目のキー (「Enter: Start」)
