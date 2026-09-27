@@ -47,6 +47,28 @@ animations = [{
 }, {
 "frames": [{
 "duration": 1.0,
+"texture": ExtResource("8_flyer_bottom_a")
+}, {
+"duration": 1.0,
+"texture": ExtResource("9_flyer_bottom_b")
+}],
+"loop": true,
+"name": &"low_flyer_bottom",
+"speed": 14.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("6_flyer_top_a")
+}, {
+"duration": 1.0,
+"texture": ExtResource("7_flyer_top_b")
+}],
+"loop": true,
+"name": &"low_flyer_top",
+"speed": 14.0
+}, {
+"frames": [{
+"duration": 1.0,
 "texture": ExtResource("2_top_walk_a")
 }, {
 "duration": 1.0,
