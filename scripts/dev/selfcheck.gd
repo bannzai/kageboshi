@@ -72,6 +72,7 @@ func _initialize() -> void:
 	_check_scroll_for()
 	_check_shadow_position()
 	_check_attack_area()
+	_check_body_animation()
 	_check_spawns()
 	_check_patrol()
 	_check_enemy_hp()
@@ -128,6 +129,22 @@ func _check_next_velocity() -> void:
 	_check(air_jump.y == -100.0 + gravity_step, "ジャンプ: 空中ではジャンプできず重力で加速する")
 	var falling: Vector2 = HERO_SCRIPT.next_velocity(Vector2.ZERO, 0.0, false, false, 0.25)
 	_check(falling.y == gravity_step, "落下: 空中では重力で下向きに加速する")
+
+
+## 主人公の体の見た目は攻撃・空中 (上昇と落下)・歩き・待機の姿になり、影は反転区間でだけ主人公と逆を向く
+func _check_body_animation() -> void:
+	var cases: Array[Array] = [
+		[true, false, Vector2(0.0, -100.0), &"attack"],
+		[false, false, Vector2(100.0, -100.0), &"jump"],
+		[false, false, Vector2(100.0, 100.0), &"fall"],
+		[false, true, Vector2(-100.0, 0.0), &"walk"],
+		[false, true, Vector2.ZERO, &"idle"],
+	]
+	for c: Array in cases:
+		_check(HERO_SCRIPT.body_animation(c[0], c[1], c[2]) == c[3], "見た目: %s の姿を選ぶ" % c[3])
+	var in_zone: Vector2 = Vector2(TEST_LIGHTS[0]["x"], 0.0)
+	_check(MAIN_SCRIPT.shadow_facing(in_zone, 1.0, TEST_LIGHTS) == -1.0, "見た目: 反転区間の影は逆を向く")
+	_check(MAIN_SCRIPT.shadow_facing(Vector2.ZERO, -1.0, TEST_LIGHTS) == -1.0, "見た目: 区間外は同じ向き")
 
 
 func _check_scroll_for() -> void:

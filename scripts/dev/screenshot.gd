@@ -43,7 +43,7 @@ func _run() -> void:
 
 
 ## 撮影する画面の並び (起動直後のタイトル → プレイ開始 → 段差の手前でジャンプした瞬間 → 段差の上 →
-## 右へスクロールして壁の手前 → ポーズ → 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス →
+## 右へスクロールして壁の手前 → ポーズ → 左へ歩く姿 → 右へ歩く姿 → 上下の画面の敵 → 上下で同時に攻撃を当てた同期ボーナス →
 ## 敵に触れ続けたゲームオーバー → リトライした昼のステージで光源の手前で見える反転区間の予兆 →
 ## 高い光源の反転区間で逆へ動いて縮んだ影の攻撃 → 影を縫い止めて主人公だけが進んだ影縫い → 引き寄せの途中 →
 ## 主人公を止めて影だけが進んだ逆の影縫い → ゴールに入ったステージクリア → 夕方のステージの開始 →
@@ -99,9 +99,29 @@ func _capture_terrain_and_scroll() -> bool:
 	if not await _capture("tmp/screenshot-pause.png"):
 		return false
 	await _hold_keys([KEY_ESCAPE], 1)
+	if not await _capture_walks():
+		return false
 	main.queue_free()
 	await process_frame
 	return true
+
+
+## 壁の手前の段から左へ歩いている途中と、そこから右へ歩いている途中 (段に着く前) を撮る
+func _capture_walks() -> bool:
+	if not await _capture_walk(KEY_LEFT, 16, "tmp/screenshot-walk-left.png"):
+		return false
+	return await _capture_walk(KEY_RIGHT, 10, "tmp/screenshot-walk-right.png")
+
+
+## physical_keycode の向きへ physics_frames 物理フレーム歩かせ、歩いている途中の主人公と影 (歩きの姿と向き) を
+## path へ撮影してからキーを離す
+func _capture_walk(physical_keycode: Key, physics_frames: int, path: String) -> bool:
+	Input.parse_input_event(_key_event(physical_keycode, true))
+	await _wait_physics_frames(physics_frames)
+	var captured: bool = await _capture(path)
+	Input.parse_input_event(_key_event(physical_keycode, false))
+	await physics_frame
+	return captured
 
 
 ## プレイ中のまま新しいメインシーンを置き (GameState の画面は前のシーンから引き継ぐ)、敵・同期ボーナス・

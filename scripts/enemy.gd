@@ -5,16 +5,12 @@ extends Node2D
 ## 出現する画面 (Combat.Lane)
 const Combat := preload("res://scripts/combat.gd")
 
-## 体の大きさ。scenes/enemy.tscn の Body の大きさと同じ値
+## 体の大きさ。scenes/enemy.tscn の Body の見た目 (64 px 四方の絵を 0.5 倍) と同じ大きさ
 const SIZE: Vector2 = Vector2(32.0, 32.0)
 ## 往復の速さ (px/秒)。主人公の移動の速さの約 1/5 で、近づいてから攻撃するまでの余裕を持たせる
 const SPEED: float = 60.0
 ## 体力。同期ボーナスのない攻撃 (Combat.BASE_DAMAGE) なら 3 回で倒れる
 const MAX_HP: int = 3
-## 上の画面の敵の色
-const TOP_COLOR: Color = Color(0.45, 0.2, 0.55, 1.0)
-## 下の画面の敵の色 (影の世界に溶け込みすぎないよう赤みを持たせる)
-const BOTTOM_COLOR: Color = Color(0.55, 0.12, 0.16, 1.0)
 
 ## 出現している画面
 var lane: Combat.Lane = Combat.Lane.TOP
@@ -27,12 +23,14 @@ var patrol_max_x: float = 0.0
 ## 進む向き (-1 = 左、1 = 右)
 var direction: float = -1.0
 
-## 敵の見た目
-@onready var body: ColorRect = $Body
+## 敵の見た目。出現している画面の名前のアニメーション (上の画面は紫、下の画面は影の世界に溶け込みすぎない赤の
+## スライム) を、進む向きに合わせて左右反転して歩かせる。絵は左を向いている
+@onready var body: AnimatedSprite2D = $Body
 
 
 func _ready() -> void:
-	body.color = TOP_COLOR if lane == Combat.Lane.TOP else BOTTOM_COLOR
+	body.play(&"top" if lane == Combat.Lane.TOP else &"bottom")
+	body.flip_h = direction > 0.0
 
 
 ## tree に入れる前に呼ぶ。at は体の左上で、そこから左へ patrol の幅を往復する
@@ -48,6 +46,7 @@ func physics_step(delta: float) -> void:
 	var next: Vector2 = patrol_step(position.x, direction, patrol_min_x, patrol_max_x, delta)
 	position.x = next.x
 	direction = next.y
+	body.flip_h = direction > 0.0
 
 
 ## 体の矩形 (ステージ上の座標)
