@@ -573,7 +573,7 @@ func _check_stage_lights() -> void:
 						previous["x"] + previous["zone"]
 						<= MAIN_SCRIPT.shadow_reverse_range(light).position.x
 					),
-					"%s: x の昇順で、反転区間と予兆の帯が前の光源の反転区間と重ならない" % label
+					"%s: x の昇順で、反転区間と影が逆へ動く範囲が前の光源の反転区間と重ならない" % label
 				)
 			_check_shadow_in_zone(light, lights, label)
 	var day: Vector2i = _scale_counts(stages[0])
@@ -672,8 +672,8 @@ func _check_stage_layouts() -> void:
 				_check(obstacles[i - 1].position.x <= rect.position.x, "%s: x の昇順" % label)
 			_check(not rect.intersects(goal), "%s: ゴールと重ならない" % label)
 		for light: Dictionary in stage.lights:
-			var band: Rect2 = MAIN_SCRIPT.shadow_reverse_range(light)
-			var left: float = band.position.x - HERO_SCRIPT.SIZE.x / 2.0
+			var reverse_range: Rect2 = MAIN_SCRIPT.shadow_reverse_range(light)
+			var left: float = reverse_range.position.x - HERO_SCRIPT.SIZE.x / 2.0
 			var right: float = light["x"] + light["zone"] + HERO_SCRIPT.SIZE.x / 2.0
 			var moving: Rect2 = Rect2(left, 0.0, right - left, STAGE_SCRIPT.GROUND_Y)
 			for rect: Rect2 in obstacles:
