@@ -1,7 +1,7 @@
 extends Node
 ## ゲーム進行の状態 (autoload の GameState)。いま表示している画面 (タイトル・プレイ中・ポーズ・ゲームオーバー・
-## ステージクリア・設定) と遊んでいるステージ、主人公と影で共有する体力、被弾直後の無敵時間、影縫いのゲージを持つ。
-## 体力が 0 になるとゲームオーバーの画面に移る。
+## ステージクリア・設定) と遊んでいるステージ、主人公と影それぞれの体力と被弾直後の無敵時間、影縫いのゲージを持つ。
+## どちらかの体力が 0 になるとゲームオーバーの画面に移る。
 
 ## 表示している画面。ステージが進むのは PLAYING の間だけ
 enum Screen { TITLE, PLAYING, PAUSED, GAME_OVER, CLEAR, SETTINGS }
@@ -11,10 +11,12 @@ enum Command { CONFIRM, PAUSE, QUIT, SETTINGS, BACK }
 
 ## 遊ぶ順に並べたステージの一覧
 const Stages := preload("res://scripts/stages.gd")
+## 体力を持つ体を表す画面 (上の画面は主人公、下の画面は影)
+const Combat := preload("res://scripts/combat.gd")
 ## ステージ 1 本の定義
 const Stage := preload("res://scripts/stage.gd")
 
-## 体力の最大値。上下の画面の敵に 1 回ずつ触れても半分以上残り、立て直せる値にする
+## 主人公と影それぞれの体力の最大値 (仮の値)
 const MAX_HP: int = 5
 ## 被弾してから次のダメージを受けない時間 (秒)。敵に触れ続けても毎フレーム減らないようにする
 const INVINCIBLE_TIME: float = 1.0
@@ -40,18 +42,18 @@ const TRANSITIONS: Dictionary = {
 var screen: Screen = Screen.TITLE
 ## 遊んでいるステージの番号 (Stages.all() の添字)。起動時とタイトルへ戻った時は最初のステージ
 var stage_index: int = 0
-## 残りの体力
-var hp: int = MAX_HP
-## 無敵の残り時間 (秒)。0 より大きい間はダメージを受けない
-var invincible_left: float = 0.0
+## 主人公と影それぞれの残りの体力。Combat.Lane で引く (上の画面は主人公、下の画面は影)
+var hp: Array[int] = [MAX_HP, MAX_HP]
+## 主人公と影それぞれの無敵の残り時間 (秒)。hp と同じく Combat.Lane で引く。0 より大きい間はその体はダメージを受けない
+var invincible_left: Array[float] = [0.0, 0.0]
 ## 影縫いのゲージの残り。0 の間は縫い止められない
 var gauge: float = MAX_GAUGE
 
 
 ## ステージの開始時の体力とゲージに戻す
 func reset() -> void:
-	hp = MAX_HP
-	invincible_left = 0.0
+	hp = [MAX_HP, MAX_HP]
+	invincible_left = [0.0, 0.0]
 	gauge = MAX_GAUGE
 
 
@@ -60,7 +62,7 @@ func is_playing() -> bool:
 	return screen == Screen.PLAYING
 
 
-## 体力が 0 になってゲームオーバーの画面にいるか
+## どちらかの体力が 0 になってゲームオーバーの画面にいるか
 func is_game_over() -> bool:
 	return screen == Screen.GAME_OVER
 
@@ -75,26 +77,27 @@ func is_last_stage() -> bool:
 	return stage_index >= Stages.count() - 1
 
 
-## 無敵の間か
-func is_invincible() -> bool:
-	return invincible_left > 0.0
+## lane の画面の体が無敵の間か
+func is_invincible(lane: Combat.Lane) -> bool:
+	return invincible_left[lane] > 0.0
 
 
-## amount だけ体力を減らし、無敵時間を始める。無敵の間とゲームオーバー後は減らさない。減らしたら true。
-## 0 になったらゲームオーバーの画面に移る
-func take_damage(amount: int) -> bool:
-	if is_game_over() or is_invincible():
+## lane の画面で被弾した体の体力を amount だけ減らし、その体の無敵時間を始める。
+## その体が無敵の間とゲームオーバー後は減らさない。減らしたら true。0 になったらゲームオーバーの画面に移る
+func take_damage(lane: Combat.Lane, amount: int) -> bool:
+	if is_game_over() or is_invincible(lane):
 		return false
-	hp = maxi(hp - amount, 0)
-	invincible_left = INVINCIBLE_TIME
-	if hp == 0:
+	hp[lane] = maxi(hp[lane] - amount, 0)
+	invincible_left[lane] = INVINCIBLE_TIME
+	if hp[lane] == 0:
 		screen = Screen.GAME_OVER
 	return true
 
 
-## delta 秒だけ無敵時間を進める
+## delta 秒だけ主人公と影の無敵時間を進める
 func tick(delta: float) -> void:
-	invincible_left = maxf(invincible_left - delta, 0.0)
+	for lane: int in invincible_left.size():
+		invincible_left[lane] = maxf(invincible_left[lane] - delta, 0.0)
 
 
 ## ゲージが残っていて縫い止められるか

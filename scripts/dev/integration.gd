@@ -26,8 +26,6 @@ const Main := preload("res://scripts/main.gd")
 const Hero := preload("res://scripts/hero.gd")
 ## 敵のスクリプト (体力)
 const Enemy := preload("res://scripts/enemy.gd")
-## 攻撃の画面 (Lane) とダメージ
-const Combat := preload("res://scripts/combat.gd")
 ## 画面 (Screen) の定義を持つ autoload の GameState のスクリプト
 const GameStateScript := preload("res://scripts/game_state.gd")
 ## 設定と進行の保存・読み込みを持つ autoload の SaveData のスクリプト
@@ -129,14 +127,21 @@ func _play_from_title(main: Node2D, game_state: Node, label: String) -> void:
 	var bgm: AudioStreamPlayer = main.get_node("Audio/Bgm")
 	_check(game_state.screen == GameStateScript.Screen.TITLE, "%s: タイトルの画面になる" % label)
 	_check(main.get_node("Screens/Title").visible, "%s: タイトルが表示される" % label)
-	_check(not main.get_node("Overlay/HpLabel").visible, "%s: タイトルでは体力を表示しない" % label)
+	var hero_hp_label: Label = main.get_node("Overlay/HpLabel")
+	var shadow_hp_label: Label = main.get_node("Overlay/ShadowHpLabel")
+	_check(
+		not hero_hp_label.visible and not shadow_hp_label.visible,
+		"%s: タイトルでは主人公と影の体力を表示しない" % label
+	)
 	_check(not bgm.playing, "%s: タイトルでは BGM を鳴らさない" % label)
 	await _hold_keys([KEY_RIGHT, KEY_SPACE], 10)
 	_check(hero.position == hero_start, "%s: タイトルでは移動・ジャンプのキーで主人公が動かない" % label)
 	await _hold_keys([KEY_ENTER], 1)
 	_check(game_state.is_playing(), "%s: Enter キーでプレイが始まる" % label)
 	_check(not main.get_node("Screens/Title").visible, "%s: プレイが始まるとタイトルが消える" % label)
-	_check(main.get_node("Overlay/HpLabel").visible, "%s: プレイ中は体力を表示する" % label)
+	_check(
+		hero_hp_label.visible and shadow_hp_label.visible, "%s: プレイ中は主人公と影の体力を表示する" % label
+	)
 	_check(bgm.playing, "%s: プレイが始まると BGM が鳴る" % label)
 	await _wait_physics_frames(2)
 
@@ -190,7 +195,8 @@ func _check_retry(main: Node2D, game_state: Node) -> Node2D:
 		return null
 	_check(game_state.is_playing(), "リトライ: タイトルを経ずにプレイ中になる")
 	_check(restarted.get_node("Audio/Bgm").playing, "リトライ: 作り直したステージで BGM が鳴る")
-	_check(game_state.hp == game_state.MAX_HP, "リトライ: 体力が最大値に戻る")
+	var max_hp: int = game_state.MAX_HP
+	_check(_hp_is(game_state, max_hp, max_hp), "リトライ: 主人公と影の体力が最大値に戻る")
 	_check(not restarted.get_node("Screens/GameOver").visible, "リトライ: ゲームオーバーの表示が消える")
 	_check(_living_enemy_count(restarted) == 0, "リトライ: 敵がいなくなる")
 	var hero: Hero = restarted.get_node("Hero")
@@ -199,7 +205,7 @@ func _check_retry(main: Node2D, game_state: Node) -> Node2D:
 	return restarted
 
 
-## プレイ中の index 番目のステージのメインシーン main で、そのステージが読み込まれていること・光源の予兆と反転区間の
+## プレイ中の index 番目のステージのメインシーン main で、そのステージが読み込まれていること・光源の反転区間の
 ## 影を確かめてから、最初の位置からゴールに着いてステージクリアになり、操作を受け付けないことを確かめる。
 ## Enter キーで次のステージ (最後のステージならタイトル) へ移り、読み込み直されたメインシーンを返す
 func _check_stage(main: Node2D, game_state: Node, index: int) -> Node2D:
@@ -215,7 +221,6 @@ func _check_stage(main: Node2D, game_state: Node, index: int) -> Node2D:
 	_check(
 		bgm.playing and bgm.stream == StageBgm.STAGE_BGM[stage.id], "%s: ステージの BGM が鳴る" % label
 	)
-	_check_light_omen(main, stage)
 	for light: Dictionary in stage.lights:
 		await _check_light_reversal(main, light)
 	await _run_to_goal(main, game_state, stage, label)
@@ -244,7 +249,10 @@ func _check_stage(main: Node2D, game_state: Node, index: int) -> Node2D:
 		_check(
 			game_state.stage_index == index + 1, "%s: Enter キーで次のステージへ進む" % label
 		)
-		_check(game_state.hp == game_state.MAX_HP, "%s: 次のステージは体力が最大値から始まる" % label)
+		_check(
+			_hp_is(game_state, game_state.MAX_HP, game_state.MAX_HP),
+			"%s: 次のステージは主人公と影の体力が最大値から始まる" % label
+		)
 	return restarted
 
 
@@ -462,7 +470,7 @@ func _check_attack_and_sync(main: Node2D) -> void:
 
 ## 空を飛ぶ敵は地面に立ったままの攻撃では届かず、跳んだ最高点での攻撃が当たって、体力の回数だけ当てると倒れる。
 ## 上下の画面の飛ぶ敵に跳んで同時に当てると 1 回で倒れる。地面に立つ主人公の頭の上の飛ぶ敵には触れず、真下から
-## 跳ぶと触れて体力が減る
+## 跳ぶと触れて主人公の体力だけが減る
 func _check_flyer(main: Node2D, game_state: Node) -> void:
 	var hero: Hero = main.get_node("Hero")
 	var front_x: float = hero.position.x + Hero.SIZE.x + 10.0
@@ -490,12 +498,19 @@ func _check_flyer(main: Node2D, game_state: Node) -> void:
 		"飛ぶ敵: 上下の飛ぶ敵にジャンプ中の攻撃を同時に当てると 1 回で倒れる"
 	)
 
-	var start_hp: int = game_state.hp
+	var hero_hp: int = game_state.hp[Combat.Lane.TOP]
+	var shadow_hp: int = game_state.hp[Combat.Lane.BOTTOM]
 	main.spawn_enemy(Combat.Lane.TOP, hero.position.x, Stage.GROUND_Y, 0.0, Enemy.Kind.FLYER)
 	await _wait_physics_frames(int(Enemy.BOB_PERIOD * 60.0))
-	_check(game_state.hp == start_hp, "飛ぶ敵: 地面に立つ主人公の頭の上を揺れて飛ぶ敵には触れない")
+	_check(
+		_hp_is(game_state, hero_hp, shadow_hp),
+		"飛ぶ敵: 地面に立つ主人公の頭の上を揺れて飛ぶ敵には触れない"
+	)
 	await _hold_keys([KEY_SPACE], 20)
-	_check(game_state.hp == start_hp - 1, "飛ぶ敵: 真下から跳ぶと触れて体力が減る")
+	_check(
+		_hp_is(game_state, hero_hp - 1, shadow_hp),
+		"飛ぶ敵: 真下から跳ぶと触れて主人公の体力だけが減る"
+	)
 	_clear_enemies(main)
 	await _wait_physics_frames(int(game_state.INVINCIBLE_TIME * 60.0) + 10)
 
@@ -515,50 +530,56 @@ func _jump_attack(hero: Hero) -> void:
 	_check(hero.is_on_floor(), "飛ぶ敵: 跳んで攻撃した後に着地する")
 
 
-## 下の画面の敵が影に触れても、上の画面の敵が主人公に触れても体力が減り、0 でゲームオーバーになる
+## 下の画面の敵が影に触れると影の体力だけが、上の画面の敵が主人公に触れると主人公の体力だけが減り、被弾した体だけが
+## 半透明になる。無敵時間は体ごとに持ち、影の体力が残っていても主人公の体力が 0 になるとゲームオーバーになる
 func _check_damage_and_game_over(main: Node2D, game_state: Node) -> void:
 	var hero: Hero = main.get_node("Hero")
+	var shadow: Node2D = main.get_node("BottomLane/Shadow")
 	var damage_sound: AudioStreamPlayer = main.get_node("Audio/Damage")
 	await _wait_physics_frames(40)
-	var start_hp: int = game_state.hp
+	var hero_hp: int = game_state.hp[Combat.Lane.TOP]
+	var shadow_hp: int = game_state.hp[Combat.Lane.BOTTOM]
 	_check(not damage_sound.playing, "効果音: 敵に触れる前はダメージの効果音が鳴らない")
 	var bottom_enemy: Node2D = main.spawn_enemy(
 		Combat.Lane.BOTTOM, hero.position.x + 10.0, Stage.GROUND_Y, 0.0
 	)
 	await _wait_physics_frames(2)
-	_check(game_state.hp == start_hp - 1, "ダメージ: 下の画面の敵が影に触れると体力が減る")
+	_check(
+		_hp_is(game_state, hero_hp, shadow_hp - 1), "ダメージ: 下の画面の敵が影に触れると影の体力だけが減る"
+	)
 	_check(damage_sound.playing, "効果音: ダメージを受けるとダメージの効果音が鳴る")
+	_check(shadow.modulate.a < 1.0 and hero.modulate.a == 1.0, "ダメージ: 被弾した影だけが半透明になる")
+	var top_enemy: Node2D = main.spawn_enemy(
+		Combat.Lane.TOP, hero.position.x + 10.0, Stage.GROUND_Y, 0.0
+	)
+	await _wait_physics_frames(2)
+	_check(
+		_hp_is(game_state, hero_hp - 1, shadow_hp - 1) and hero.modulate.a < 1.0,
+		"ダメージ: 影が無敵の間も、上の画面の敵が主人公に触れると主人公の体力だけが減って半透明になる"
+	)
 	bottom_enemy.queue_free()
+	top_enemy.queue_free()
 	await _wait_physics_frames(int(game_state.INVINCIBLE_TIME * 60.0) + 10)
-	_check(game_state.hp == start_hp - 1, "ダメージ: 敵が離れれば体力は減らない")
+	_check(_hp_is(game_state, hero_hp - 1, shadow_hp - 1), "ダメージ: 敵が離れれば体力は減らない")
+	_check(
+		hero.modulate.a == 1.0 and shadow.modulate.a == 1.0,
+		"ダメージ: 無敵時間が過ぎると主人公も影も半透明から戻る"
+	)
 
 	main.spawn_enemy(Combat.Lane.TOP, hero.position.x + 10.0, Stage.GROUND_Y, 0.0)
-	await _wait_physics_frames(2)
-	_check(game_state.hp == start_hp - 2, "ダメージ: 上の画面の敵が主人公に触れると体力が減る")
-
-	var frames_left: int = int(game_state.INVINCIBLE_TIME * 60.0) * (start_hp + 1)
+	var frames_left: int = int(game_state.INVINCIBLE_TIME * 60.0) * (hero_hp + 1)
 	while not game_state.is_game_over() and frames_left > 0:
 		await physics_frame
 		frames_left -= 1
-	_check(game_state.is_game_over() and game_state.hp == 0, "ゲームオーバー: 敵に触れ続けて体力が 0 になる")
+	_check(
+		game_state.is_game_over() and _hp_is(game_state, 0, shadow_hp - 1),
+		"ゲームオーバー: 影の体力が残っていても、上の画面の敵に触れ続けて主人公の体力が 0 になる"
+	)
 	_check(main.get_node("Screens/GameOver").visible, "ゲームオーバー: ゲームオーバーの表示が出る")
 	_check(main.get_node("Audio/Bgm").stream_paused, "ゲームオーバー: BGM が止まる")
 	var over_x: float = hero.position.x
 	await _hold_keys([KEY_RIGHT], 20)
 	_check(absf(hero.position.x - over_x) < POSITION_TOLERANCE, "ゲームオーバー: 操作を受け付けない")
-
-
-## stage の各光源の反転区間の予兆として、下の画面の光源の x から左へ、反転区間の幅に倍率を掛けた幅の帯が置かれている
-func _check_light_omen(main: Node2D, stage: Stage) -> void:
-	for light: Dictionary in stage.lights:
-		var width: float = light["zone"] * Light.shadow_scale(light["height"])
-		var band: Rect2 = Rect2(light["x"] - width, main.SCREEN_HEIGHT, width, Stage.GROUND_Y)
-		var found: bool = false
-		for child: Node in main.get_node("BottomLane/BottomLights").get_children():
-			found = found or (
-				child is ColorRect and Rect2(child.position, child.size).is_equal_approx(band)
-			)
-		_check(found, "予兆: 光源 (x = %d) の反転区間で影が動く範囲に下の画面の帯がある" % int(light["x"]))
 
 
 ## light (遊んでいるステージの Stage.lights の要素) の手前から右キーで進むと、光源をまたいだ反転区間で影だけが左へ、光源の倍率の分だけ
@@ -600,11 +621,11 @@ func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 		),
 		"%s: 伸び縮みした影も主人公の足元と仕切り線をはさんで対称な足元から下へ伸びて描かれる" % label
 	)
-	var band: Rect2 = main.shadow_reverse_range(light)
+	var reverse_range: Rect2 = main.shadow_reverse_range(light)
 	var shadow_center: float = shadow.position.x + Hero.SIZE.x / 2.0
 	_check(
-		band.position.x <= shadow_center and shadow_center <= band.end.x,
-		"%s: 反転区間の影は予兆の帯の範囲にいる" % label
+		reverse_range.position.x <= shadow_center and shadow_center <= reverse_range.end.x,
+		"%s: 反転区間の影は光源から左へ反転区間の幅に倍率を掛けた範囲にいる" % label
 	)
 
 	var behind: Node2D = main.spawn_enemy(
