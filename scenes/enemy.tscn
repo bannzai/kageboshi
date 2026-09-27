@@ -1,10 +1,14 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/enemy.gd" id="1_enemy"]
 [ext_resource type="Texture2D" path="res://assets/sprites/enemy/slime_normal_walk_a.png" id="2_top_walk_a"]
 [ext_resource type="Texture2D" path="res://assets/sprites/enemy/slime_normal_walk_b.png" id="3_top_walk_b"]
 [ext_resource type="Texture2D" path="res://assets/sprites/enemy/slime_fire_walk_a.png" id="4_bottom_walk_a"]
 [ext_resource type="Texture2D" path="res://assets/sprites/enemy/slime_fire_walk_b.png" id="5_bottom_walk_b"]
+[ext_resource type="Texture2D" path="res://assets/sprites/enemy/bee_a.png" id="6_flyer_top_a"]
+[ext_resource type="Texture2D" path="res://assets/sprites/enemy/bee_b.png" id="7_flyer_top_b"]
+[ext_resource type="Texture2D" path="res://assets/sprites/enemy/fly_a.png" id="8_flyer_bottom_a"]
+[ext_resource type="Texture2D" path="res://assets/sprites/enemy/fly_b.png" id="9_flyer_bottom_b"]
 
 [sub_resource type="SpriteFrames" id="SpriteFrames_enemy"]
 animations = [{
@@ -18,6 +22,28 @@ animations = [{
 "loop": true,
 "name": &"bottom",
 "speed": 4.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("8_flyer_bottom_a")
+}, {
+"duration": 1.0,
+"texture": ExtResource("9_flyer_bottom_b")
+}],
+"loop": true,
+"name": &"flyer_bottom",
+"speed": 8.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("6_flyer_top_a")
+}, {
+"duration": 1.0,
+"texture": ExtResource("7_flyer_top_b")
+}],
+"loop": true,
+"name": &"flyer_top",
+"speed": 8.0
 }, {
 "frames": [{
 "duration": 1.0,

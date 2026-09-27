@@ -4,8 +4,8 @@ extends Node2D
 ## 向かい合わせる (bottom_lane)。影は主人公と同じ動き・同じ攻撃をし、光源をまたいだ先の反転区間でだけ
 ## 左右の動きが逆になり、光源の高さで伸び縮みする (scripts/light.gd)。
 ## 影縫いで影か主人公を縫い止めると上下の位置がずれ、引き寄せで同期に戻る (scripts/shadow_stitch.gd)。
-## 敵は上下どちらの画面にも出て、上の画面の敵が主人公に触れると主人公の体力、下の画面の敵が影に触れると影の体力
-## (GameState) が減る。
+## 敵 (地面を歩く敵と空を飛ぶ敵) は上下どちらの画面にも出て、上の画面の敵が主人公に触れると主人公の体力、
+## 下の画面の敵が影に触れると影の体力 (GameState) が減る。
 ## ステージが進むのはプレイ中の画面の間だけで、タイトル・ポーズ・ゲームオーバー・ステージクリア・設定の画面は
 ## GameState の画面に合わせて重ねて表示する。ステージを最初からやり直す時と次のステージへ進む時は、このシーンを
 ## 読み込み直す。遊んでいるステージ (昼・夕方・夜) は GameState が持つ。
@@ -21,7 +21,7 @@ const StageBgm := preload("res://scripts/stage_bgm.gd")
 const Light := preload("res://scripts/light.gd")
 ## 主人公のスクリプト (体の大きさ・攻撃の範囲と 1 物理フレームの進め方)
 const Hero := preload("res://scripts/hero.gd")
-## 敵のスクリプト (体の大きさ)
+## 敵のスクリプト (種類と、種類ごとの体の置き方)
 const Enemy := preload("res://scripts/enemy.gd")
 ## 攻撃の当たりと同期ボーナスの計算
 const Combat := preload("res://scripts/combat.gd")
@@ -249,13 +249,21 @@ func _step_stage(delta: float) -> void:
 		save_data.mark_cleared(stage.id)
 
 
-## lane の画面の、x から左へ patrol の幅を往復する敵を置く。floor_y は足元の y 座標 (上の画面の座標)
-func spawn_enemy(lane: Combat.Lane, x: float, floor_y: float, patrol: float) -> Enemy:
+## lane の画面の、x から左へ patrol の幅を往復する kind の敵を置く。floor_y は足元の床の y 座標 (上の画面の座標)。
+## kind の既定を地面を歩く敵にするのは、飛ぶ敵を足す前からある検証・撮影 (scripts/dev/) の呼び出しが地面を歩く敵を
+## 置くものだから
+func spawn_enemy(
+	lane: Combat.Lane,
+	x: float,
+	floor_y: float,
+	patrol: float,
+	kind: Enemy.Kind = Enemy.Kind.WALKER
+) -> Enemy:
 	var enemy: Enemy = ENEMY_SCENE.instantiate()
-	var at: Vector2 = Vector2(x, floor_y - Enemy.SIZE.y)
+	var at: Vector2 = Vector2(x, Enemy.body_top(kind, floor_y))
 	if lane == Combat.Lane.BOTTOM:
 		at.y += SCREEN_HEIGHT
-	enemy.setup(lane, at, patrol)
+	enemy.setup(lane, kind, at, patrol)
 	lane_enemies[lane].add_child(enemy)
 	return enemy
 
@@ -385,7 +393,9 @@ func _spawn_due_enemies() -> void:
 	var due: int = stage.due_spawn_count(scroll_x + SCREEN_WIDTH)
 	while spawned_count < due:
 		var spawn: Dictionary = stage.spawns[spawned_count]
-		spawn_enemy(spawn["lane"], spawn["x"], spawn["floor_y"], spawn["patrol"])
+		spawn_enemy(
+			spawn["lane"], spawn["x"], spawn["floor_y"], spawn["patrol"], Stage.spawn_kind(spawn)
+		)
 		spawned_count += 1
 
 

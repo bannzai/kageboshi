@@ -255,15 +255,6 @@ func _hp_text(hp: Array[int]) -> String:
 	return "主人公 %d / 影 %d" % [hp[Combat.Lane.TOP], hp[Combat.Lane.BOTTOM]]
 
 
-## 倒れて消える途中のものを除いた敵
-func _living_enemies(main: Node2D) -> Array[Node]:
-	var living: Array[Node] = []
-	for enemy: Node in _enemies(main):
-		if not enemy.is_queued_for_deletion():
-			living.append(enemy)
-	return living
-
-
 ## 最後のステージのクリアの画面 (ALL CLEAR) を撮り、録画の末尾に映し続ける。終了で音の再生がリークしないよう、
 ## 画面を残したまま音を止めて AudioServer が解放するまで待つ。ALL CLEAR の画面でなければ false
 func _end_on_all_clear(main: Node2D, game_state: Node) -> bool:
@@ -296,9 +287,3 @@ func _capture_once(name: String) -> bool:
 		return true
 	captured[name] = true
 	return await _capture("tmp/playtest-%s.png" % name)
-
-
-## path のファイルがあれば消す
-func _remove_file(path: String) -> void:
-	if FileAccess.file_exists(path):
-		DirAccess.remove_absolute(path)

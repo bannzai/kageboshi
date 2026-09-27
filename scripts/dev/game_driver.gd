@@ -1,7 +1,8 @@
 extends SceneTree
 ## キー入力 (InputMap を通る InputEventKey) でメインシーンを動かす開発用スクリプト (scripts/dev/ の screenshot.gd・
 ## playtest.gd と、headless_check.gd を継承する selfcheck.gd・integration.gd) が共通で使う、キーの押し方・物理フレームの
-## 待ち方・ゴールまで進む入力の経路・撮影。各スクリプトは _initialize() から自分の検証・撮影を始める。
+## 待ち方・ゴールまで進む入力の経路・メインシーンの敵の集め方・撮影・保存データのファイルの削除。
+## 各スクリプトは _initialize() から自分の検証・撮影を始める。
 
 ## ゴールまで進む入力の経路 (_walk_to_goal()) で、1 物理フレームにどう動くか
 enum RouteStep {
@@ -51,6 +52,15 @@ func _enemies(main: Node2D) -> Array[Node]:
 	return enemies
 
 
+## 倒れて消える途中のものを除いた敵
+func _living_enemies(main: Node2D) -> Array[Node]:
+	var living: Array[Node] = []
+	for enemy: Node in _enemies(main):
+		if not enemy.is_queued_for_deletion():
+			living.append(enemy)
+	return living
+
+
 ## 描画が反映されるまで 2 フレーム待ってから viewport を path に PNG で保存する。失敗したら quit(1) する
 func _capture(path: String) -> bool:
 	await process_frame
@@ -96,3 +106,9 @@ func _key_event(physical_keycode: Key, pressed: bool) -> InputEventKey:
 	event.keycode = physical_keycode
 	event.pressed = pressed
 	return event
+
+
+## path のファイルがあれば消す
+func _remove_file(path: String) -> void:
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
