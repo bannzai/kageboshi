@@ -184,7 +184,10 @@ func _check_retry(main: Node2D, game_state: Node) -> Node2D:
 	var max_hp: int = game_state.MAX_HP
 	_check(_hp_is(game_state, max_hp, max_hp), "リトライ: 主人公と影の体力が最大値に戻る")
 	_check(not restarted.get_node("Screens/GameOver").visible, "リトライ: ゲームオーバーの表示が消える")
-	_check(_living_enemies(restarted).size() == 0, "リトライ: 敵がいなくなる")
+	_check(
+		_living_enemies(restarted).size() == restarted.spawned_count,
+		"リトライ: 前の敵がいなくなり、ステージの最初に出る敵だけがいる"
+	)
 	var hero: Hero = restarted.get_node("Hero")
 	await _hold_keys([KEY_RIGHT], 10)
 	_check(hero.position.x > hero_start.x, "リトライ: 右キーで主人公が動く")
@@ -390,8 +393,11 @@ func _reloaded_main(old_main: Variant, label: String) -> Node2D:
 	return main
 
 
-## 攻撃キーで目の前の敵に攻撃が当たり、通常の攻撃は体力の回数で、上下で同時に当てた攻撃は 1 回で倒す
+## 攻撃キーで目の前の敵に攻撃が当たり、通常の攻撃は体力の回数で、上下で同時に当てた攻撃は 1 回で倒す。
+## 倒れたことを残った敵の数で確かめるため、ステージの最初から出ている敵 (昼の低く飛ぶ敵) を先に消す
 func _check_attack_and_sync(main: Node2D) -> void:
+	_clear_enemies(main)
+	await physics_frame
 	var hero: Hero = main.get_node("Hero")
 	var front_x: float = hero.position.x + Hero.SIZE.x + 10.0
 	var top_enemy: Node2D = main.spawn_enemy(Combat.Lane.TOP, front_x, Stage.GROUND_Y, 0.0)
