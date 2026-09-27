@@ -292,7 +292,7 @@ func _capture_attack(main: Node2D, path: String) -> bool:
 		quit(1)
 		return false
 	await _hold_keys([KEY_J], 1)
-	if not main.get_node("Shadow/Attack").visible:
+	if not main.get_node("BottomLane/Shadow/Attack").visible:
 		push_error("影の攻撃が表示されていない: %s" % path)
 		quit(1)
 		return false
@@ -305,8 +305,9 @@ func _place_hero(main: Node2D, center_x: float) -> void:
 	hero.position = Vector2(center_x - Hero.SIZE.x / 2.0, Stage.GROUND_Y - Hero.SIZE.y)
 	hero.velocity = Vector2.ZERO
 	await _wait_physics_frames(3)
-	for enemy: Node in main.get_node("Enemies").get_children():
-		enemy.queue_free()
+	for parent: String in ["Enemies", "BottomLane/Enemies"]:
+		for enemy: Node in main.get_node(parent).get_children():
+			enemy.queue_free()
 	await _wait_physics_frames(1)
 
 

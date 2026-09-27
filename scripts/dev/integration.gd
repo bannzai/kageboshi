@@ -5,7 +5,8 @@ extends SceneTree
 ## 最初の位置からゴールに着けること、ステージクリアから次のステージへ進むこと、光源をまたいだ反転区間で影の左右の
 ## 動きと攻撃の向きが逆になり、光源の高さで伸び縮みすること、影縫い・ゲージ切れ・引き寄せで上下がずれて同期に
 ## 戻ること、クリアしたステージの保存、設定画面での音量とキー割り当ての変更と保存、BGM がプレイ中の間だけ鳴って
-## ポーズ・ゲームオーバーで止まることと、攻撃・ダメージ・同期ボーナス・影縫いで効果音が鳴ることを検証する。
+## ポーズ・ゲームオーバーで止まることと、攻撃・ダメージ・同期ボーナス・影縫いで効果音が鳴ること、下の画面 (影・地形) が
+## 仕切り線をはさんで上の画面と上下対称に描かれることを検証する。
 ## 実行方法は AGENTS.md を参照。
 ## 保存データはプレイヤーのもの (user://) を書き換えないよう SAVE_TEST_PATH に書き、最後に消す。
 ## 失敗したら quit(1) で終わる。
@@ -18,6 +19,8 @@ const Stages := preload("res://scripts/stages.gd")
 const StageBgm := preload("res://scripts/stage_bgm.gd")
 ## 光源の高さから影の倍率を求める計算
 const Light := preload("res://scripts/light.gd")
+## メインシーンのスクリプト (上の画面の高さ = 仕切り線の y)
+const Main := preload("res://scripts/main.gd")
 ## 主人公のスクリプト (体の大きさ)
 const Hero := preload("res://scripts/hero.gd")
 ## 敵のスクリプト (体力)
@@ -431,11 +434,11 @@ func _check_attack_and_sync(main: Node2D) -> void:
 	_check(not sync_sound.playing, "効果音: 上の画面だけに当てた時は同期ボーナスの効果音が鳴らない")
 
 	await _wait_physics_frames(20)
-	_check(not main.get_node("Shadow/Attack").visible, "攻撃: 攻撃が終われば影の攻撃も消える")
+	_check(not main.get_node("BottomLane/Shadow/Attack").visible, "攻撃: 攻撃が終われば影の攻撃も消える")
 	main.spawn_enemy(Combat.Lane.TOP, front_x, Stage.GROUND_Y, 0.0)
 	main.spawn_enemy(Combat.Lane.BOTTOM, front_x, Stage.GROUND_Y, 0.0)
 	await _press_attack()
-	_check(main.get_node("Shadow/Attack").visible, "攻撃: 同期中は影も同じ攻撃をする")
+	_check(main.get_node("BottomLane/Shadow/Attack").visible, "攻撃: 同期中は影も同じ攻撃をする")
 	_check(_living_enemy_count(main) == 0, "同期: 上下で同時に当てた攻撃 1 回で上下の敵が倒れる")
 	_check(
 		not main.get_tree().get_nodes_in_group("sync_effect").is_empty(),
@@ -502,7 +505,7 @@ func _check_light_omen(main: Node2D, stage: Stage) -> void:
 		var width: float = light["zone"] * Light.shadow_scale(light["height"])
 		var band: Rect2 = Rect2(light["x"] - width, main.SCREEN_HEIGHT, width, Stage.GROUND_Y)
 		var found: bool = false
-		for child: Node in main.get_node("Lights").get_children():
+		for child: Node in main.get_node("BottomLane/BottomLights").get_children():
 			found = found or (
 				child is ColorRect and Rect2(child.position, child.size).is_equal_approx(band)
 			)
@@ -514,7 +517,8 @@ func _check_light_omen(main: Node2D, stage: Stage) -> void:
 ## 下の画面の敵に当たる。反転区間を抜けると影が主人公の真下に戻る
 func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 	var hero: Hero = main.get_node("Hero")
-	var shadow: Node2D = main.get_node("Shadow")
+	var shadow: Node2D = main.get_node("BottomLane/Shadow")
+	var shadow_body: ColorRect = main.get_node("BottomLane/Shadow/Body")
 	var label: String = "光源 (%s の x = %d)" % [main.stage.title, int(light["x"])]
 	var scale: float = Light.shadow_scale(light["height"])
 	hero.position = Vector2(light["x"] - 80.0 - Hero.SIZE.x / 2.0, Stage.GROUND_Y - Hero.SIZE.y)
@@ -534,8 +538,16 @@ func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 		"%s: 影の移動量は主人公の移動量に光源の倍率を掛けた量" % label
 	)
 	_check(
-		is_equal_approx(main.get_node("Shadow/Body").size.y, Hero.SIZE.y * scale),
+		is_equal_approx(shadow_body.size.y, Hero.SIZE.y * scale),
 		"%s: 影の見た目の長さが光源の倍率の分だけ伸び縮みする" % label
+	)
+	var drawn: Rect2 = _drawn_rect(shadow_body)
+	_check(
+		(
+			is_equal_approx(drawn.position.y, _mirrored(_drawn_rect(hero.get_node("Body"))).position.y)
+			and is_equal_approx(drawn.size.y, Hero.SIZE.y * scale)
+		),
+		"%s: 伸び縮みした影も主人公の足元と仕切り線をはさんで対称な足元から下へ伸びて描かれる" % label
 	)
 	var band: Rect2 = main.shadow_reverse_range(light)
 	var shadow_center: float = shadow.position.x + Hero.SIZE.x / 2.0
@@ -548,7 +560,7 @@ func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 		Combat.Lane.BOTTOM, shadow.position.x - Enemy.SIZE.x - 4.0, Stage.GROUND_Y, 0.0
 	)
 	await _press_attack()
-	var attack: ColorRect = main.get_node("Shadow/Attack")
+	var attack: ColorRect = main.get_node("BottomLane/Shadow/Attack")
 	_check(attack.visible, "%s: 反転区間でも影が攻撃する" % label)
 	_check(
 		attack.global_position.x + attack.size.x <= shadow.global_position.x + POSITION_TOLERANCE,
@@ -572,14 +584,14 @@ func _check_light_reversal(main: Node2D, light: Dictionary) -> void:
 	)
 	_check_synced(main, label + " の反転区間を抜けた後")
 	_check(
-		main.get_node("Shadow/Body").size == Hero.SIZE,
+		shadow_body.size == Hero.SIZE,
 		"%s: 反転区間を抜けると影の見た目の長さが主人公と同じに戻る" % label
 	)
 
 
 ## 出現済みの敵をすべて消す (光源の検証で、位置を移した主人公・影に敵が触れないようにする)
 func _clear_enemies(main: Node2D) -> void:
-	for enemy: Node in main.get_node("Enemies").get_children():
+	for enemy: Node in _enemies(main):
 		enemy.queue_free()
 
 
@@ -607,8 +619,8 @@ func _hold_key_until(physical_keycode: Key, reached: Callable) -> void:
 ## 縫い止め続けるとゲージが切れて解除される
 func _check_stitch_and_pull(main: Node2D, game_state: Node) -> void:
 	var hero: Hero = main.get_node("Hero")
-	var shadow: Node2D = main.get_node("Shadow")
-	var shadow_needle: CanvasItem = main.get_node("Shadow/Needle")
+	var shadow: Node2D = main.get_node("BottomLane/Shadow")
+	var shadow_needle: CanvasItem = main.get_node("BottomLane/Shadow/Needle")
 	var hero_needle: CanvasItem = main.get_node("Hero/Needle")
 	hero.position = hero_start
 	hero.velocity = Vector2.ZERO
@@ -744,10 +756,17 @@ func _press_attack() -> void:
 ## 倒れて消える途中のものを除いた敵の数
 func _living_enemy_count(main: Node2D) -> int:
 	var count: int = 0
-	for enemy: Node in main.get_node("Enemies").get_children():
+	for enemy: Node in _enemies(main):
 		if not enemy.is_queued_for_deletion():
 			count += 1
 	return count
+
+
+## 上の画面と下の画面の敵
+func _enemies(main: Node2D) -> Array[Node]:
+	var enemies: Array[Node] = main.get_node("Enemies").get_children()
+	enemies.append_array(main.get_node("BottomLane/Enemies").get_children())
+	return enemies
 
 
 ## 平らな地面での左右移動とジャンプ
@@ -829,7 +848,7 @@ func _check_terrain_and_scroll(main: Node2D) -> void:
 ## 高い地形 (壁の上) から跳んでも主人公は上の画面の上端を越えず、影は下の画面からはみ出さない
 func _check_ceiling(main: Node2D) -> void:
 	var hero: Hero = main.get_node("Hero")
-	var shadow: Node2D = main.get_node("Shadow")
+	var shadow: Node2D = main.get_node("BottomLane/Shadow")
 	hero.position = Vector2(WALL.position.x + 10.0, WALL.position.y - Hero.SIZE.y)
 	hero.velocity = Vector2.ZERO
 	await _wait_physics_frames(3)
@@ -850,31 +869,46 @@ func _check_ceiling(main: Node2D) -> void:
 	)
 	_check(
 		highest_shadow > main.SCREEN_HEIGHT - POSITION_TOLERANCE,
-		"天井: 影が下の画面の上端を越えて上の画面に入らない"
+		"天井: 影が下の画面の下端を越えて画面の外に出ない"
 	)
 
 
-## 影は主人公から上の画面 1 つ分だけ下にいて、画面上の位置も同じ横位置・上の画面 1 つ分下にある。
-## 影の足元は下の画面の地形の上にある
+## 影は主人公から上の画面 1 つ分だけ下にいる (判定の座標)。画面上では影の体が主人公の真下に、主人公の体と仕切り線を
+## はさんで上下対称に映る (足元を仕切り線の側に向け、そこから下へ伸びる)
 func _check_synced(main: Node2D, label: String) -> void:
 	var hero: Node2D = main.get_node("Hero")
-	var shadow: Node2D = main.get_node("Shadow")
+	var shadow: Node2D = main.get_node("BottomLane/Shadow")
 	var offset: Vector2 = Vector2(0.0, main.SCREEN_HEIGHT)
 	_check(shadow.position == hero.position + offset, "%s: 影が主人公と同じ位置 (下の画面) にいる" % label)
-	var hero_on_screen: Vector2 = hero.get_global_transform_with_canvas().origin
-	var shadow_on_screen: Vector2 = shadow.get_global_transform_with_canvas().origin
+	var hero_on_screen: Rect2 = _drawn_rect(hero.get_node("Body"))
+	var shadow_on_screen: Rect2 = _drawn_rect(shadow.get_node("Body"))
 	_check(
-		shadow_on_screen.is_equal_approx(hero_on_screen + offset),
-		"%s: 画面上でも影が主人公の真下 (上の画面 1 つ分下) に映る" % label
+		shadow_on_screen.is_equal_approx(_mirrored(hero_on_screen)),
+		"%s: 画面上で影の体が主人公の体と仕切り線をはさんで上下対称に映る" % label
 	)
+	_check(
+		shadow_on_screen.position.y >= Main.SCREEN_HEIGHT,
+		"%s: 画面上で影の体が仕切り線より下に、足元から下へ伸びて映る" % label
+	)
+
+
+## control の画面上の矩形。上下反転した親の下でも、大きさが正の矩形で返す
+func _drawn_rect(control: Control) -> Rect2:
+	return control.get_global_transform_with_canvas() * Rect2(Vector2.ZERO, control.size)
+
+
+## 画面上の矩形 rect を仕切り線 (y = Main.SCREEN_HEIGHT) を軸に上下反転した矩形
+func _mirrored(rect: Rect2) -> Rect2:
+	return Rect2(rect.position.x, Main.SCREEN_HEIGHT * 2.0 - rect.end.y, rect.size.x, rect.size.y)
 
 
 ## 上の画面の地形は stage の地形 (Stage.terrain()) と同じ位置・大きさで、下の画面の地形は上の画面の地形と同じ形で
-## 上の画面 1 つ分だけ下にある
+## 上の画面 1 つ分だけ下にあり (判定の座標)、画面上では上の画面の地形を仕切り線で上下反転した位置に映る
 func _check_terrain_mirrored(main: Node2D, stage: Stage) -> void:
 	var terrain: Array[Rect2] = stage.terrain()
 	var top: Array[Node] = main.get_node("TopTerrain").get_children()
-	var bottom: Array[Node] = main.get_node("BottomTerrain").get_children()
+	var bottom_terrain: Node2D = main.get_node("BottomLane/BottomTerrain")
+	var bottom: Array[Node] = bottom_terrain.get_children()
 	_check(
 		top.size() == terrain.size(), "地形 (%s): 上の画面にステージの地形の数だけ地形がある" % stage.title
 	)
@@ -888,8 +922,15 @@ func _check_terrain_mirrored(main: Node2D, stage: Stage) -> void:
 			"地形 (%s の %d 番目): 上の画面の地形がステージの地形の位置・大きさにある" % [stage.title, i]
 		)
 		_check(
-			bottom_rect.global_position == body.global_position + Vector2(0.0, main.SCREEN_HEIGHT),
+			(
+				bottom_terrain.position + bottom_rect.position
+				== body.global_position + Vector2(0.0, main.SCREEN_HEIGHT)
+			),
 			"地形 (%s の %d 番目): 下の画面の地形が上の画面の地形の真下にある" % [stage.title, i]
+		)
+		_check(
+			_drawn_rect(bottom_rect).is_equal_approx(_mirrored(_drawn_rect(top_rect))),
+			"地形 (%s の %d 番目): 下の画面の地形が上の画面の地形と仕切り線をはさんで上下対称に映る" % [stage.title, i]
 		)
 		_check(
 			bottom_rect.size == top_rect.size, "地形 (%s の %d 番目): 上下の地形が同じ大きさ" % [stage.title, i]
