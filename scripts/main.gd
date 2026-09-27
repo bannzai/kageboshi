@@ -1,6 +1,7 @@
 extends Node2D
 ## 上下 2 画面の横スクロール。上の画面に主人公と地形、下の画面に影と同じ形の地形を置き、
-## 1 台のカメラで上下を同じ横スクロール量で映す。影は主人公と同じ動き・同じ攻撃をし、光源をまたいだ先の反転区間でだけ
+## 1 台のカメラで上下を同じ横スクロール量で映す。下の画面は仕切り線を軸に上下逆さまに描き、主人公と影が足元を
+## 向かい合わせる (bottom_lane)。影は主人公と同じ動き・同じ攻撃をし、光源をまたいだ先の反転区間でだけ
 ## 左右の動きが逆になり、光源の高さで伸び縮みする (scripts/light.gd)。
 ## 影縫いで影か主人公を縫い止めると上下の位置がずれ、引き寄せで同期に戻る (scripts/shadow_stitch.gd)。
 ## 敵は上下どちらの画面にも出て、主人公・影のどちらが触れても共有の体力 (GameState) が減る。
@@ -33,8 +34,8 @@ const SaveDataScript := preload("res://scripts/save_data.gd")
 ## 敵のシーン
 const ENEMY_SCENE: PackedScene = preload("res://scenes/enemy.tscn")
 
-## 上の画面 1 つ分の高さ。project.godot の viewport (1280x720) を上下に 2 等分した値。
-## 下の画面の影・地形・敵は、上の画面のものからこの分だけ下にずらして置く
+## 上の画面 1 つ分の高さ。project.godot の viewport (1280x720) を上下に 2 等分した値で、仕切り線の y でもある。
+## 下の画面の影・地形・敵の判定の座標は、上の画面のものからこの分だけ下にずらした値 (描画の座標は bottom_lane)
 const SCREEN_HEIGHT: float = 360.0
 ## 画面の幅。project.godot の viewport の幅と同じ値
 const SCREEN_WIDTH: float = 1280.0
@@ -111,14 +112,20 @@ var pulling: bool = false
 @onready var save_data: SaveDataScript = get_node("/root/SaveData")
 ## 上の画面の主人公
 @onready var hero: Hero = $Hero
+## 下の画面に描くもの (地形・反転区間の予兆・敵・影) の親。子の位置は判定の座標 (上の画面の座標から SCREEN_HEIGHT
+## だけ下) のまま置き、この親の変換 (_ready() で y を反転して 3 * SCREEN_HEIGHT だけ下へ動かす) で描画の座標へ写す。
+## 判定の y が SCREEN_HEIGHT + h (上の画面の y = h) のものは描画の y = 2 * SCREEN_HEIGHT - h に描かれ、上の画面を
+## 仕切り線 (y = SCREEN_HEIGHT) で上下反転した位置になる (主人公の足元の y = 320 と影の足元の描画の y = 400 が
+## 仕切り線をはさんで向かい合う)。x は反転しない
+@onready var bottom_lane: Node2D = $BottomLane
 ## 下の画面の影。位置は _sync_shadow() で主人公とずれから導く
-@onready var shadow: Node2D = $Shadow
+@onready var shadow: Node2D = $BottomLane/Shadow
 ## 影の体の見た目。主人公の体の見た目と同じ絵を暗く塗ったもので、高さは光源の倍率で伸び縮みする
-@onready var shadow_body: AnimatedSprite2D = $Shadow/Body
+@onready var shadow_body: AnimatedSprite2D = $BottomLane/Shadow/Body
 ## 影の攻撃の見た目。主人公の攻撃から導く
-@onready var shadow_attack: ColorRect = $Shadow/Attack
+@onready var shadow_attack: ColorRect = $BottomLane/Shadow/Attack
 ## 影を縫い止めている間に影の足元に刺す針の見た目
-@onready var shadow_needle: ColorRect = $Shadow/Needle
+@onready var shadow_needle: ColorRect = $BottomLane/Shadow/Needle
 ## 主人公を縫い止めている間に主人公の足元に刺す針の見た目
 @onready var hero_needle: ColorRect = $Hero/Needle
 ## 上下の画面を同じスクロール量で映すカメラ
@@ -126,11 +133,13 @@ var pulling: bool = false
 ## 上の画面の地形 (当たり判定と見た目) を入れる親
 @onready var top_terrain: Node2D = $TopTerrain
 ## 下の画面の地形 (見た目だけ) を入れる親。上の画面 1 つ分下にずらしてある
-@onready var bottom_terrain: Node2D = $BottomTerrain
-## 光源と反転区間の予兆 (見た目だけ) を入れる親
+@onready var bottom_terrain: Node2D = $BottomLane/BottomTerrain
+## 上の画面の光源と反転区間を照らす光 (見た目だけ) を入れる親
 @onready var lights: Node2D = $Lights
-## 上下の画面の敵を入れる親
-@onready var enemies: Node2D = $Enemies
+## 下の画面の反転区間の予兆 (見た目だけ) を入れる親
+@onready var bottom_lights: Node2D = $BottomLane/BottomLights
+## 敵を入れる親。Combat.Lane で引く (上の画面の敵は Enemies、下の画面の敵は BottomLane/Enemies)
+@onready var lane_enemies: Array[Node2D] = [$Enemies as Node2D, $BottomLane/Enemies as Node2D]
 ## 上下の画面の仕切り線に重ねる光。同期ボーナスの時だけ不透明にしてから消す
 @onready var sync_flash: ColorRect = $Overlay/SyncFlash
 ## 体力の表示
@@ -183,6 +192,9 @@ func _ready() -> void:
 	goal.position = stage.goal().position
 	goal.size = stage.goal().size
 	goal.color = GOAL_COLOR
+	bottom_lane.transform = Transform2D(
+		0.0, Vector2(1.0, -1.0), 0.0, Vector2(0.0, SCREEN_HEIGHT * 3.0)
+	)
 	camera.make_current()
 	_build_terrain()
 	_build_lights()
@@ -244,7 +256,7 @@ func spawn_enemy(lane: Combat.Lane, x: float, floor_y: float, patrol: float) -> 
 	if lane == Combat.Lane.BOTTOM:
 		at.y += SCREEN_HEIGHT
 	enemy.setup(lane, at, patrol)
-	enemies.add_child(enemy)
+	lane_enemies[lane].add_child(enemy)
 	return enemy
 
 
@@ -298,7 +310,7 @@ func _build_lights() -> void:
 		lights.add_child(_terrain_rect(Rect2(x - 3.0, lamp_y, 6.0, light["height"]), LAMP_POST_COLOR))
 		lights.add_child(_terrain_rect(Rect2(x - 10.0, lamp_y - 12.0, 20.0, 14.0), LAMP_LIGHT_COLOR))
 		var band: Rect2 = shadow_reverse_range(light)
-		lights.add_child(_terrain_rect(band, REVERSE_ZONE_COLOR))
+		bottom_lights.add_child(_terrain_rect(band, REVERSE_ZONE_COLOR))
 		var arrow_y: float = band.get_center().y
 		var arrow_x: float = band.position.x + REVERSE_ARROW_SPACING / 2.0
 		while arrow_x < band.end.x:
@@ -311,7 +323,7 @@ func _build_lights() -> void:
 				]
 			)
 			arrow.color = LAMP_LIGHT_COLOR
-			lights.add_child(arrow)
+			bottom_lights.add_child(arrow)
 			arrow_x += REVERSE_ARROW_SPACING
 
 
@@ -397,9 +409,10 @@ func _spawn_due_enemies() -> void:
 ## 倒れて消える途中のものを除いた敵
 func _living_enemies() -> Array[Enemy]:
 	var living: Array[Enemy] = []
-	for enemy: Enemy in enemies.get_children():
-		if not enemy.is_queued_for_deletion():
-			living.append(enemy)
+	for parent: Node2D in lane_enemies:
+		for enemy: Enemy in parent.get_children():
+			if not enemy.is_queued_for_deletion():
+				living.append(enemy)
 	return living
 
 
