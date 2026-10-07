@@ -142,8 +142,8 @@ build-all: build-macos build-windows build-linux
 clean:
 	rm -rf build $(LOG_DIR)
 
-# 引数なしの make で動作確認 (verify) を実行する
-.DEFAULT_GOAL := verify
+# 引数なしの make で run を実行する (人が手で動作確認するための入口。検査・テストは CI が行う)
+.DEFAULT_GOAL := run
 
 .PHONY: verify
 verify: test build-all
