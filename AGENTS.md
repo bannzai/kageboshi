@@ -28,9 +28,9 @@
 | スクリーンショット (タイトル・プレイ開始・ジャンプ・段差・スクロール・ポーズ・左右へ歩く姿・敵・同期ボーナス・ゲームオーバー・空を飛ぶ敵・縮んだ影が低く飛ぶ敵をくぐる姿 (`screenshot-shadow-duck.png`)・伸びた影の股の下を地面を歩く敵が通る姿 (`screenshot-shadow-straddle.png`)・ステージクリア・夕方と夜のステージ・クリアを保存したタイトル・設定画面・壊れた保存データの知らせの見た目。headless の検証では見た目の崩れを検出できない) | `make screenshot` | exit 0 かつ `tmp/screenshot-*.png` が生成される |
 | 起動の録画 (操作なしの起動〜タイトルの表示。起動直後の描画崩れ・真っ黒を検出する) | `make movie` | exit 0 かつ `tmp/movie.mp4` が生成され、末尾のフレームの輝度平均が基準以上 (ffmpeg が必要) |
 | テストプレイの録画 (タイトルから昼 → 夕方 → 夜の全ステージを、攻撃・ジャンプ・影縫い・引き寄せを使い敵を倒しながら ALL CLEAR まで通して遊ぶ。ステージごとの開始・光源の影響範囲・敵との戦闘・クリアの時点を静止画にも撮る。全ステージを通しても 3 分以内) | `make playtest` | exit 0 かつ `tmp/playtest.mp4` と `tmp/playtest-*.png` が生成され、`tmp/playtest.log` に `playtest OK` が出力され、WARNING / ERROR 行がない (ffmpeg が必要) |
-| ゲームをエディタなしで起動 (人が遊んで確かめる。アセットのインポートを含む) | `make run` | ウィンドウが開きタイトル画面が表示される |
+| ゲームをエディタなしで起動 (人が遊んで確かめる入口。アセットのインポートを含み、検査・テストは含まない。引数なしの `make` で実行される) | `make run` (= `make`) | ウィンドウが開きタイトル画面が表示される |
 | デスクトップエクスポート | `make build-macos` / `make build-windows` / `make build-linux` / `make build-all` | exit 0 で `build/<platform>/` に成果物が生成される |
-| 動作確認 (test → build-all。CI の lint / check-and-export job と同じ内容。引数なしの `make` で実行される) | `make verify` (= `make`) | exit 0 |
+| 検査・テストの一括実行 (test → build-all。CI の lint / check-and-export job と同じ内容。引数なしの `make` では実行されない) | `make verify` | exit 0 |
 
 - 画面や状態を追加したら `scripts/dev/screenshot.gd` の `_capture_scenes()` に撮影を足し、入力で変わる振る舞いは `scripts/dev/integration.gd` に検証を足す
 - Godot の起動にはすべて `--log-file` を付ける (Makefile の `ENGINE_LOG`)。付けないと Godot が `user://` にログを書こうとし、書き込みを拒否するサンドボックスでは起動に失敗する
